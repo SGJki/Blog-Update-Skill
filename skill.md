@@ -32,15 +32,19 @@ digraph blog_update {
     main [label="Main Session\n(Coordinator)"];
     implement [label="implement-agent\nContent Generation"];
     merge [label="merge-agent\nSmart Merge"];
+    write1 [label="Write merged\ncontent to file"];
     review [label="review-agent\nQuality Review"];
     format [label="format-agent\nFrontmatter Generation"];
+    write2 [label="Write final\ncontent to file"];
 
     main -> implement [label="Start"];
     implement -> merge;
-    merge -> review;
+    merge -> write1 [label="output merged content"];
+    write1 -> review [label="file written"];
     review -> format [label="PASS"];
     review -> implement [label="FAIL\n(Loop)"];
-    format -> main [label="Return Content"];
+    format -> write2 [label="content + frontmatter"];
+    write2 -> main [label="done"];
 }
 ```
 
@@ -65,16 +69,31 @@ After implement-agent completes, launch merge-agent with `run_in_background: tru
 - Pass existing file path (if it exists)
 - merge-agent performs multi-granularity smart merge
 
-### Step 6: Launch review-agent
-After merge-agent completes, launch review-agent with `run_in_background: true`.
-- PASS: Proceed to Step 7
-- FAIL: Feedback issues to implement-agent for revision, loop Step 4-6 (max 3 times)
+### Step 6: Write merged content to file IMMEDIATELY
+After merge-agent completes, the main session **MUST write the merged content to file BEFORE launching review-agent**.
 
-### Step 7: Launch format-agent
+**Critical**: review-agent reads the file to verify content. If Write happens AFTER review-agent launch, review-agent will read the OLD file and report "missing content".
+
+```
+merge-agent output ──→ Main session Write tool ──→ File (NEW content)
+                                      │
+                                      ▼
+                              launch review-agent
+                                      │
+                                      ▼
+                              review-agent reads NEW file ✓
+```
+
+### Step 7: Launch review-agent
+After file is written, launch review-agent with `run_in_background: true`.
+- PASS: Proceed to Step 8
+- FAIL: Feedback issues to implement-agent for revision, loop Step 4-7 (max 3 times)
+
+### Step 8: Launch format-agent
 Launch format-agent with `run_in_background: true`, passing the reviewed content and metadata.
-After format-agent returns, the main session uses the Write tool to write to file.
+After format-agent returns, the main session uses the Write tool to write final content to file.
 
-### Step 8: Report Completion
+### Step 9: Report Completion
 Confirm to the user: file path, operation type, and merge statistics.
 
 ## Subagent Roles
@@ -105,6 +124,7 @@ Confirm to the user: file path, operation type, and merge statistics.
 | Exceeded maximum loop count (3 times) | Prompt user to manually check content |
 | merge-agent merge failed | Use implement-agent content as final content |
 | format-agent timeout | Prompt user to retry |
+| **Write before review skipped** | **CRITICAL: Always write merged content BEFORE launching review-agent. review-agent must read the NEWLY written file, not the old file.** |
 
 ## Quick Reference
 
@@ -123,7 +143,18 @@ Confirm to the user: file path, operation type, and merge statistics.
 | format-agent | Background | Generate frontmatter (no write) |
 
 ### Write Flow
-format-agent returns content -> Main session Write tool writes to file
+
+**CRITICAL: Two separate Write operations**
+
+1. **Write 1 (before review)**: After merge-agent completes, main session writes merged content to file immediately. This is REQUIRED so review-agent can verify the new content.
+
+2. **Write 2 (after format)**: After format-agent returns with frontmatter, main session writes final content to file.
+
+```
+merge-agent output ──→ Write 1 (merged content) ──→ review-agent reads file
+                                                        │
+format-agent output ──→ Write 2 (final content) ◄───────┘
+```
 
 ## Red Flags - STOP and Start Over
 
