@@ -1,75 +1,75 @@
 # Blog Update Skill
 
-将 Claude 会话内容智能合并到 fuwari-framework 博客文章。
+Intelligently merge Claude session content into fuwari-framework blog posts.
 
-## 使用方法
+## Usage
 
 ```bash
-# 新建文章
+# Create new article
 /blog-update <topic> --tags [tag1,tag2] --category <category>
 
-# 更新已存在文章（自动读取现有 tags/category）
+# Update existing article (auto-read existing tags/category)
 /blog-update <topic>
 ```
 
-## 文件结构
+## File Structure
 
 ```
 blog-update/
-├── skill.md              # 主技能文件 (Overview + Workflow)
+├── skill.md              # Main skill file (Overview + Workflow)
 ├── prompts/             # Subagent prompts
-│   ├── implement-agent.md  # 内容生成
-│   ├── merge-agent.md      # 智能合并
-│   ├── review-agent.md     # 质量审查
-│   └── format-agent.md    # 格式化
-└── config.json          # 用户配置
+│   ├── implement-agent.md  # Content generation
+│   ├── merge-agent.md      # Smart merge
+│   ├── review-agent.md     # Quality review
+│   └── format-agent.md     # Formatting
+└── config.json          # User configuration
 ```
 
-## 工作流程
+## Workflow
 
 ```
 Main Session
     │
-    ├─ Step 1: 检查配置，获取 blogBasePath
-    ├─ Step 2: 检查文件存在 → 收集 tags/category
-    ├─ Step 3: 提取会话上下文
-    ├─ Step 4: implement-agent (生成内容)
-    ├─ Step 5: merge-agent (多粒度智能合并)
-    ├─ Step 6: review-agent (质量审查)
-    │         └─ FAIL → 返回 Step 4 修订 (最多 3 次)
-    ├─ Step 7: format-agent (生成 frontmatter)
-    └─ Step 8: 主会话写入文件，报告完成
+    ├─ Step 1: Check config, get blogBasePath
+    ├─ Step 2: Check file exists -> collect tags/category
+    ├─ Step 3: Extract session context
+    ├─ Step 4: implement-agent (generate content)
+    ├─ Step 5: merge-agent (multi-granularity smart merge)
+    ├─ Step 6: review-agent (quality review)
+    │         └─ FAIL -> Return to Step 4 revision (max 3 times)
+    ├─ Step 7: format-agent (generate frontmatter)
+    └─ Step 8: Main session writes file, report completion
 ```
 
-## 合并算法
+## Merge Algorithm
 
-### Level 1: 标题相似度 (Jaccard)
-- > 70%: 同一主题，保留现有
-- < 60%: 不同主题，新增
-- 60-70%: [边缘-1]
+### Level 1: Title Similarity (Jaccard)
+- > 70%: Same topic, keep existing
+- < 60%: Different topic, add new
+- 60-70%: [edge-1]
 
-### Level 2: 段落相似度 (TF-IDF + 余弦)
-- > 60%: 内容重复，保留现有
-- < 30%: 完全不同，新增
-- 30-60%: [边缘-2]
+### Level 2: Paragraph Similarity (TF-IDF + Cosine)
+- > 60%: Duplicate content, keep existing
+- < 30%: Completely different, add new
+- 30-60%: [edge-2]
 
-### Level 3: 内容丰富度对比
-- 句子数量 (30%)
-- 代码示例数 (40%)
-- 技术术语密度 (30%)
+### Level 3: Content Richness Comparison
+- Sentence count (30%)
+- Code example count (40%)
+- Technical term density (30%)
 
-详见 [prompts/merge-agent.md](prompts/merge-agent.md)
+See [prompts/merge-agent.md](prompts/merge-agent.md) for details.
 
-## 边缘情况
+## Edge Cases
 
-当遇到 `[边缘-N]` 标记的情况时：
-1. 用户决策处理方式
-2. 记录到 merge-agent.md 的边缘情况处理记录表
-3. 评估是否更新算法规则
+When encountering `[edge-N]` markers:
+1. User decides how to handle
+2. Record to edge case handling record table in merge-agent.md
+3. Evaluate whether to update algorithm rules
 
-## 配置文件
+## Configuration
 
-位置: `~/.claude/skills/blog-update/config.json`
+Location: `~/.claude/skills/blog-update/config.json`
 
 ```json
 {
@@ -78,12 +78,13 @@ Main Session
 }
 ```
 
-## 版本历史
+## Version History
 
-| 版本 | 主要变化 |
-|------|---------|
-| V1 | 基础博客更新 |
-| V2 | Subagent 架构分离 |
-| V3 | 智能多粒度合并 |
-| V4 | CSO 优化，prompts 拆分，<200 lines |
-| V5 | 合并算法增强，Red Flags 安全检查 |
+| Version | Major Changes |
+|---------|--------------|
+| V1 | Basic blog update |
+| V2 | Subagent architecture separation |
+| V3 | Smart multi-granularity merge |
+| V4 | CSO optimization, prompts split, <200 lines |
+| V5 | Merge algorithm enhancement, Red Flags safety check |
+| V6 | Full English localization |
