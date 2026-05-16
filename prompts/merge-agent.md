@@ -8,109 +8,49 @@ Perform multi-granularity comparison between new content and existing files, int
 - **existing_file_path**: Target file path (skip merge if does not exist)
 - **topic**: Article topic
 
-## Multi-Granularity Merge Algorithm
+## Merge Algorithm
 
-### Level 1: Title-Level Similarity Comparison
-- Similarity > 70%: Both titles point to the same topic, keep existing content
-- Similarity 60-70%: Titles differ but are related, use new_content
-- Similarity < 60%: Titles are clearly different, new_content is a new topic
+### Level 1: Title-Level Comparison
+Compare section headings between new and existing content:
+- **Highly similar titles** (clearly the same topic): Both point to the same section — proceed to Level 2 to decide which version to keep
+- **Somewhat related titles**: Sections are related but cover different angles — keep both
+- **Clearly different titles**: New section — append it
 
-### Level 2: Paragraph-Level Similarity Comparison
-- Similarity > 60%: Content is highly repetitive, keep existing paragraph
-- Similarity 30%-60%: Content is related but different, take union or choose the more complete one
-- Similarity < 30%: Content is completely different, keep new_content paragraph
+### Level 2: Paragraph-Level Comparison
+For sections with matching titles, compare paragraph content:
+- **Highly repetitive** (same information restated): Keep the more complete version
+- **Related but different** (same topic, different details): Merge by taking the union of information
+- **Completely different**: Keep both paragraphs under the shared heading
 
 ### Level 3: Content Richness Comparison
-
-When titles and paragraphs are similar (within thresholds), compare content richness to decide which to keep. Three dimensions are evaluated:
-
-- **Sentence count:** Richer content (more sentences) indicates more developed explanation
-- **Code examples:** More code blocks indicate more practical content
-- **Time-sensitive content:** For topics that evolve, more recent content may be preferred
-
-The weighted scoring below quantifies these dimensions:
-
-| Dimension | Weight | Calculation |
-|-----------|--------|-------------|
-| Sentence count | 30% | new_sentences / old_sentences |
-| Code example count | 40% | Direct comparison of code block count |
-| Technical term density | 30% | Count of technical terms / total words |
-
-**Note:** Term density uses a simple ratio (not TF-IDF). Technical terms are identified via heuristics: programming language keywords, framework names, API names, or domain-specific terminology. TF-IDF is used only in Level 2 for paragraph similarity comparison.
-
-**Decision:** Higher richness score takes priority
-
-## Similarity Calculation Formulas
-
-### Level 1: Title Similarity (Jaccard)
-
-```
-Jaccard(A, B) = |A ∩ B| / |A ∪ B|
-
-Calculation after removing stopwords:
-title_words = set(title words after stopword removal)
-similarity = len(words_a ∩ words_b) / len(words_a ∪ words_b)
-```
-
-**Threshold Rationale:**
-- > 70%: Both titles are highly similar, should be considered the same topic
-- 60-70%: Edge case, requires human judgment --> [edge-1]
-- < 60%: Clearly different topics
-
-### Level 2: Paragraph Similarity (TF-IDF + Cosine)
-
-```python
-# Pseudocode
-def paragraph_similarity(p1, p2):
-    tfidf1 = TFIDF(p1)
-    tfidf2 = TFIDF(p2)
-    return cosine_similarity(tfidf1, tfidf2)
-
-def cosine_similarity(a, b):
-    return dot(a, b) / (norm(a) * norm(b))
-```
-
-**Threshold Rationale:**
-- > 60%: Content is highly repetitive, keep existing
-- 30-60%: Edge case, requires human judgment --> [edge-2]
-- < 30%: Completely different, add new
+When both versions cover similar content, prefer the version that is:
+- **More detailed** (more sentences, deeper explanation)
+- **More practical** (more code examples, commands, configuration)
+- **More current** (for time-sensitive topics)
 
 ## Worked Example
 
-### Sample Input
-
-**Existing Content:**
+**Existing:**
 ```markdown
 ## Git Rebase
 
 Rebase is used to organize commit history...
 ```
 
-**New Content:**
+**New:**
 ```markdown
 ## Git Rebase
 
 Rebase is a command in Git that applies changes from one branch onto another...
+
+```bash
+git rebase main
 ```
 
-### Calculation Process
-
+This replays your commits on top of the target branch.
 ```
-Step 1: Title Comparison
-- Existing: "Git Rebase" -> words: {git, rebase}
-- New: "Git Rebase" -> words: {git, rebase}
-- Jaccard = 2/2 = 1.0 -> Similarity 100% > 70%
 
-Step 2: Paragraph Comparison
-- TF-IDF vector cosine similarity = 0.75 -> 60% < 0.75 < 70%
-
-Step 3: Enter Level 3
-- Sentences: Existing 1 sentence, New 2 sentences -> New is richer
-- Code examples: Existing 0, New 1 -> New is better
-
-Step 4: Decision
-- Merge: Take New's detailed explanation + keep code example
-```
+**Decision:** Titles match → paragraph comparison → new content is richer (more sentences + code example) → use new content.
 
 ## Merge Decision Rules
 
@@ -118,9 +58,9 @@ Step 4: Decision
 |-----------|----------|
 | No title match | Append directly to end of file |
 | Title matches, no paragraph similarity | Append paragraph under that title |
-| Content highly similar | Merge/deduplicate |
-| New content is more detailed | Update segment |
-| Old content is more detailed | Keep original content |
+| Content highly similar | Keep the richer/more complete version |
+| New content is more detailed | Replace that section |
+| Old content is more detailed | Keep original section |
 
 ## Output Format
 
@@ -151,24 +91,3 @@ Step 4: Decision
 - Strictly follow the output format
 - Only output merged content, do not add any explanations
 - Preserve the original file's heading hierarchy
-
-## Edge Case Placeholders (For Future Filling)
-
-| Tag | Edge Case Description | Status |
-|-----|----------------------|--------|
-| [edge-1] | Judgment criteria when title Jaccard is between 60-70% | Pending |
-| [edge-2] | Specific handling when paragraph similarity is between 30-60% | Pending |
-| [edge-3] | Merge strategy for multi-level heading conflicts | Pending |
-| [edge-4] | Priority judgment between code blocks and text descriptions | Pending |
-| [edge-5] | Performance considerations for large amounts of new content | Pending |
-
-**Record Format** (When encountering edge cases):
-```markdown
-## [edge-N] Handling Record
-
-**Date:** YYYY-MM-DD
-**Scenario:** <specific description>
-**Decision:** <user choice>
-**Result:** <effect evaluation>
-**Rule Update:** <whether to update algorithm>
-```
