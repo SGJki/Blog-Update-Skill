@@ -114,6 +114,13 @@ def find_first_paragraph(body):
             continue
         if stripped.startswith("#"):
             continue
+        # Skip horizontal rules — they look like paragraphs to a naive
+        # scanner but carry no descriptive content.
+        if re.match(r"^(-{3,}|\*{3,}|_{3,})$", stripped):
+            continue
+        # Skip table rows — not prose, not suitable for a description.
+        if stripped.startswith("|"):
+            continue
         para.append(stripped)
     return " ".join(para) if para else ""
 
@@ -121,7 +128,11 @@ def find_first_paragraph(body):
 def truncate_at_word(text, max_chars=150):
     if len(text) <= max_chars:
         return text
-    truncated = text[:max_chars]
+    # Reserve 1 char for the trailing ellipsis so the result is always
+    # <= max_chars. Returning max_chars+1 (e.g. 151) re-triggers the
+    # >150 branch in check_description on the next iteration, causing
+    # the auto-fix loop to exhaust its retries.
+    truncated = text[:max_chars - 1]
     last_space = truncated.rfind(" ")
     if last_space > 30:
         truncated = truncated[:last_space]
@@ -310,27 +321,44 @@ def check_title_h1(fm, body):
     return True, "", None
 
 
+def _auto_gen_description(body):
+    """Generate a valid (30-150 char) description from body's first paragraph.
+
+    Returns None if body's first paragraph is absent or itself <30 chars —
+    in that case Check #9 is non-auto-fixable (cannot manufacture substance
+    the body does not have). This prevents the auto-fix loop where a short
+    body paragraph produces a short description that re-triggers Check #9.
+    """
+    para = find_first_paragraph(body)
+    if not para:
+        return None
+    candidate = truncate_at_word(para, 150)
+    if len(candidate) < 30:
+        return None
+    return candidate
+
+
 def check_description(fm, body):
     # Missing description is auto-fixable here (do NOT also fail Check #1).
     desc = fm.get("description")
     if desc is None:
-        para = find_first_paragraph(body)
-        if not para:
-            return False, "description missing and no body paragraph to auto-generate from", None
-        return False, "description field missing", {"description": truncate_at_word(para, 150)}
+        candidate = _auto_gen_description(body)
+        if candidate is None:
+            return False, "description missing and body has no paragraph >=30 chars to auto-generate from", None
+        return False, "description field missing", {"description": candidate}
     if not isinstance(desc, str):
         desc = str(desc)
     stripped = desc.strip()
     if len(stripped) == 0:
-        para = find_first_paragraph(body)
-        if not para:
-            return False, "description empty and no body paragraph to auto-generate from", None
-        return False, "description is empty string", {"description": truncate_at_word(para, 150)}
+        candidate = _auto_gen_description(body)
+        if candidate is None:
+            return False, "description empty and body has no paragraph >=30 chars to auto-generate from", None
+        return False, "description is empty string", {"description": candidate}
     if len(stripped) < 30:
-        para = find_first_paragraph(body)
-        if not para:
-            return False, f"description only {len(stripped)} chars and no body paragraph to auto-generate from", None
-        return False, f"description only {len(stripped)} chars (need 30-150)", {"description": truncate_at_word(para, 150)}
+        candidate = _auto_gen_description(body)
+        if candidate is None:
+            return False, f"description only {len(stripped)} chars and body has no paragraph >=30 chars", None
+        return False, f"description only {len(stripped)} chars (need 30-150)", {"description": candidate}
     if len(stripped) > 150:
         return False, f"description {len(stripped)} chars (need <=150)", {"description": truncate_at_word(stripped, 150)}
     if stripped != desc:
@@ -380,6 +408,14 @@ def validate(fm, body, max_iter=3):
                 any_fix_applied = True
 
         if not any_fix_applied:
+            # Verify all checks actually pass before declaring PASS. A check
+            # can return (False, ..., None) — failed but no fix available
+            # (e.g. Check #9 when body's first paragraph is too short to
+            # generate a description). Without this re-check, such failures
+            # silently report PASS.
+            for num, name, (ok, detail, _fix) in results:
+                if not ok:
+                    return False, auto_fixes_log, f"Check #{num} ({name})", detail
             return True, auto_fixes_log, None, None
 
     results = run_all_checks(fm, body)
