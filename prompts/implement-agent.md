@@ -13,38 +13,39 @@ blog post body conforming to fuwari-framework specification. Apply the
 ## Extraction Contract (6 Rules)
 
 ### Rule E1 — Signal Threshold (mandatory filter)
-Score every "information unit" (a paragraph / a code block / a decision)
-on a 1–10 scale across three dimensions:
+For every "information unit" (a paragraph / a code block / a decision),
+ask three qualitative questions:
 
-| Dimension | How to score |
-|-----------|--------------|
-| Topic relevance | Keyword overlap with `topic`. 0 = unrelated, 10 = direct match |
-| Information density | New concepts per 100 words. ≥3 = high (10), 1–2 = mid (5), 0 = noise (1) |
-| Standalone value | Can it be understood without surrounding context? 10 = yes, 1 = no |
+| Question | High signal | Low signal |
+|----------|-------------|------------|
+| Is it on-topic? | Directly about `topic` keywords | Tangential or unrelated |
+| Does it introduce new technical substance? | New technique, command, concept, or decision | Restates what's already covered |
+| Can a reader understand it without prior context? | Yes — stands alone | No — needs earlier session fragments to make sense |
 
-**Composite score = (relevance + density + standalone) / 3.**
+**Keep** units that score "High" on at least 2 of 3 questions.
+**Discard** units that score "Low" on at least 2 of 3.
+**Borderline** (1 high + 1 low + 1 either) → defer to E2/E3/E5.
 
-- ≥7 → keep
-- 4–6.9 → defer to E2/E3/E5
-- <4 → discard silently
-
-**Hard discard (score = 1, no further analysis):** greetings, confirmations,
+**Hard discard (no further analysis):** greetings, confirmations,
 thank-yous, retry notifications, "are you sure" prompts, raw stack traces
 without diagnosis, tool-permission dialogs.
 
 ---
 
 ### Rule E2 — Progressive Refinement Merge
-When the same concept appears N times in the session (cluster by keyword
-Jaccard similarity ≥0.6), do NOT keep the shallowest or the deepest
-version alone — keep the **information union**.
+When the same concept appears multiple times in the session (recognize by
+shared key terms / discussed entities, not by exact word match), do NOT
+keep the shallowest or the deepest version alone — keep the **information
+union**.
 
 Working scratchpad (do not output):
 - Appearance 1: <core statement>
 - Appearance 2: <new dimension added>
 - Appearance N: <deepening / correction>
 
-**Output only the final synthesis** integrating all angles.
+**Output only the final synthesis** integrating all angles. If appearance
+N corrected or contradicted appearance 1, the synthesis reflects the
+final corrected view, with the correction explicitly noted.
 
 ---
 
@@ -62,7 +63,7 @@ Session "trial-and-error" paths are HIGH-VALUE blog material. Do NOT filter
 - Bold label `Working approach:` followed by a fenced `bash` code block
 - Bold label `Why this works:` followed by a one-sentence reason
 
-**Example:**
+**Example (shell):**
 
 ### Git rebase drops commits unexpectedly
 
@@ -82,6 +83,39 @@ git rebase -i --onto main feature
 
 **Why this works:** `--onto` rebases only the divergent commits, skipping the common ancestor.
 
+**Example (python):**
+
+### FastAPI request body returns None
+
+**Attempt that failed:**
+
+```python
+@app.post("/user")
+async def create(data):
+    return {"name": data.name}
+```
+
+**Why it failed:** Missing `Body(...)` annotation — FastAPI treats untyped param as a query param, not a JSON body.
+
+**Working approach:**
+
+```python
+from pydantic import BaseModel
+
+class UserIn(BaseModel):
+    name: str
+
+@app.post("/user")
+async def create(user: UserIn):
+    return {"name": user.name}
+```
+
+**Why this works:** Pydantic model param triggers FastAPI's body parser automatically.
+
+**Language identifier rule:** use the identifier matching the failing
+artifact's language (`bash` for shell commands, `python` for Python
+code, `yaml` for config, etc.). Do NOT default to `bash` for everything.
+
 **Retention criterion:** Keep only if the failure has a one-sentence
 diagnosis. Pure stack traces without diagnosis → discard.
 
@@ -98,11 +132,16 @@ Every code block MUST be paired with its rationale. Context window =
 3. `**Why this way:**` — rationale for this specific approach
 4. `**Key params:**` — bullet list of `<param>` — `<meaning>` for each non-obvious parameter
 
-**Language identifier whitelist** (use exactly these tokens):
+**Language identifier whitelist** (use exactly these tokens — review-agent
+will CRITICAL-flag any identifier not in this list):
 
 ```
-bash sh python javascript typescript go rust java kotlin swift sql
-yaml json toml ini xml html css markdown mermaid text diff dockerfile
+bash sh shell zsh fish
+python javascript typescript go rust java kotlin swift scala
+c cpp csharp cs php ruby lua perl r julia
+sql yaml json toml ini xml html css markdown
+mermaid text diff dockerfile cmake makefile ps1 powershell
+graphql protobuf
 ```
 
 - Empty identifier → critical (use `text` as fallback for ASCII art)
@@ -114,7 +153,7 @@ yaml json toml ini xml html css markdown mermaid text diff dockerfile
 
 ### Rule E5 — Narrative Reassembly (mandatory template selection)
 Do NOT output in session-chronological order. After extraction, reassemble
-into ONE of three narrative templates. Pick the template by topic type.
+into ONE of five narrative templates. Pick the template by topic type.
 
 **Template: how-to** (commands, setup, configuration)
 
@@ -140,6 +179,30 @@ into ONE of three narrative templates. Pick the template by topic type.
 4. Fix
 5. Prevention
 
+**Template: comparison** (X vs Y, framework comparison, library selection)
+
+1. What each option is (one-line definition per option)
+2. Dimension-by-dimension comparison table
+3. When to pick X
+4. When to pick Y
+5. Migration path (if relevant)
+
+**Template: faq** (Q&A compilation, troubleshooting guide)
+
+1. Topic context (1-2 paragraphs)
+2. Question 1 (H2) + answer
+3. Question 2 (H2) + answer
+...
+N. Further reading / related topics
+
+**Template selection priority:**
+
+1. Multiple options compared side-by-side → `comparison`
+2. Many independent Q&A items → `faq`
+3. Bug / incident / debugging session → `postmortem`
+4. Setup / commands / configuration steps → `how-to`
+5. Default / theory / explanation → `concept`
+
 **Append at end of output (as HTML comments — invisible to reader):**
 
 ```
@@ -148,31 +211,39 @@ into ONE of three narrative templates. Pick the template by topic type.
 ```
 
 These comments let review-agent verify template compliance.
+Signal-stats are LLM estimates (debug signal only — do not treat as
+precise counts).
 
 ---
 
 ### Rule E6 — Multi-Topic Split Detection
 Before writing the body, scan the session for topic clusters (keyword
-co-occurrence + temporal continuity). If you find **≥3 independent topics**
-(each with ≥500 words of signal material), do NOT write a merged post.
+co-occurrence + temporal continuity).
 
-**Output `SPLIT RECOMMENDATION` instead of the body:**
+**Topic count decision:**
+
+- **1 dominant topic** → proceed normally, no split
+- **2 dominant topics** → default: merge into ONE post, with a top-level
+  H2 per topic and a 1-paragraph bridge between them. Output `WARN: 2-topics-merged`
+  as the first body line so review-agent can flag if the bridge is missing.
+- **≥3 independent topics** (each with substantial material, roughly
+  ≥500 words of signal-grade content) → do NOT write a merged post.
+
+**Output `SPLIT RECOMMENDATION` for ≥3 topics:**
 
 ```
 ## SPLIT RECOMMENDATION
 
-Detected 3 independent topic clusters in session:
+Detected <N> independent topic clusters in session:
 
-- Topic A: <topic1> (~<N> words material) → suggest: /blog-update <slug1>
-- Topic B: <topic2> (~<N> words material) → suggest: /blog-update <slug2>
-- Topic C: <topic3> (~<N> words material) → suggest: /blog-update <slug3>
+- Topic A: <topic1> → suggest: /blog-update <slug1>
+- Topic B: <topic2> → suggest: /blog-update <slug2>
+- Topic C: <topic3> → suggest: /blog-update <slug3>
 
 STOP — ask user which to publish (or confirm force-merge).
 ```
 
 Main session will STOP and ask the user. Do not proceed with content generation.
-
-If the session has 1 or 2 dominant topics, proceed normally — no split needed.
 
 ---
 
@@ -209,21 +280,28 @@ If the session has 1 or 2 dominant topics, proceed normally — no split needed.
 
 ## Output Format
 
-The body is pure markdown. No frontmatter, no H1 (main session generates both).
+The body is pure markdown. No frontmatter, no H1 (main session generates
+both frontmatter and the H1 in Step 7).
+
+**Body MUST start with an H2 (`##`).** H3+ may follow inside an H2
+section. H1 must NOT appear in body.
 
 **Trailing required comments:**
 
 ```
-<!-- template: <how-to|concept|postmortem> -->
+<!-- template: <how-to|concept|postmortem|comparison|faq> -->
 <!-- signal-stats: extracted=<N>, kept=<M>, dropped=<K> -->
 ```
 
-**Constraints:**
+**Length guidance (pre-merge — this is implement-agent's single output,
+NOT the final file length after merge-agent processes it):**
 
-- First heading in body is H2 (`##`), never H1
-- Length: 500–3000 words
-  - <300 words → prefix body with `WARN: low-signal` line and proceed
-  - >5000 words → prefix body with `WARN: split-suggested` line and proceed
+- Target: 500–3000 words
+- <300 words → prefix body with `WARN: low-signal` line and proceed
+- >5000 words → prefix body with `WARN: split-suggested` line and proceed
+
+**Other constraints:**
+
 - Merge mode: do NOT regenerate content already covered in `existing_file_outline`
 - All code blocks use language identifiers from the E4 whitelist
 
@@ -236,8 +314,10 @@ Before emitting the body, verify all five:
 1. **Coverage**: list 3–5 key sub-topics of `topic`. Each must appear in the
    output. If any missing → add a section, or emit `WARN: incomplete`.
 2. **Language identifiers**: every code block uses a whitelisted identifier.
-3. **Template stages**: the output's H2 headings follow the selected
-   template's stage order (1→2→3→4→5).
+3. **Template coverage**: each stage of the selected template has at least
+   one corresponding H2 in the body (e.g., how-to template → 5 H2s for
+   Scene/Problem/Solution/Parameters/Pitfalls). Stages may share an H2
+   if compressed, but no stage may be entirely missing.
 4. **No raw session paste**: no paragraph starts with 2+ spaces of indent,
    no `<user>:` / `<assistant>:` role markers, no `<tool_result>` tags,
    no system-reminder fragments.
