@@ -61,7 +61,18 @@ merge-agent output → Write to file → launch review-agent → reads NEW file 
 - FAIL: Feed issues back to implement-agent for revision, loop Step 4–6 (max 3 times)
 
 ### Step 7: Generate frontmatter and write final content
-Main session generates frontmatter inline using the template below and prepends it to the file (Edit or Write). No subagent needed — the frontmatter is deterministic.
+Main session generates frontmatter inline using the template below, generates the H1 heading (since implement-agent must NOT output H1), and prepends both to the file (Edit or Write). No subagent needed — frontmatter and H1 are deterministic.
+
+**Order of operations:**
+
+1. Take `topic` as-is → use for `title` field AND as the H1 heading text
+2. Generate the 6-field frontmatter (see template below)
+3. Generate H1: `# <topic as-is>` (must match `title` character-for-character)
+4. Concatenate: `frontmatter + "\n\n" + H1 + "\n\n" + body` → write to file
+
+**Critical:** the H1 text MUST be character-identical to `title`. The Step 7.5
+Check #8 verifies this. If they differ, the skill will hard-stop and ask the
+user to reconcile.
 
 **fuwari frontmatter template (field names must match exactly):**
 ```yaml
@@ -80,6 +91,7 @@ draft: false
 - `categories:` (plural) → use `category:` (singular)
 - `published: true/false` → use `draft: false`
 - `tags: [Git, Tools]` (unquoted) → use `tags: ["Git", "Tools"]` (quoted strings)
+- Generating H1 from body's first sentence instead of from `topic` → use `topic` exactly
 
 ### Step 7.5: Frontmatter Validation Pass (deterministic, no subagent)
 
@@ -96,10 +108,10 @@ After Step 7 generates frontmatter and writes the file, the main session runs a 
 | 3 | `draft` value | Lowercase `false` (not `False`, not `no`, not `0`, not `true`) | Yes — rewrite to `false` |
 | 4 | `tags` format | 2–5 entries, all double-quoted strings: `["A", "B"]` | Yes — add quotes + normalize spacing |
 | 5 | `tags` count | Between 2 and 5 inclusive | No — STOP if <2 or >5 |
-| 6 | `tags` spelling | Min-edit-distance <2 from a tech-term dictionary (Git, Web, AI, DevOps, Auth, Authentication, Tools, RPC, DB, Architecture, etc.); flag suspects | No — report suspects, ask user to confirm or correct |
+| 6 | `tags` spelling | Min-edit-distance <2 from this tech-term dictionary: Git, GitHub, GitLab, Python, JavaScript, TypeScript, Go, Rust, Java, Kotlin, Swift, Scala, AI, ML, LLM, Web, DevOps, Auth, Authentication, Authorization, Tools, RPC, DB, Database, HTTP, HTTPS, API, REST, GraphQL, Docker, Kubernetes, Linux, MacOS, Windows, Architecture, Frontend, Backend, Fullstack, JWT, OAuth, SSL, TLS, CSS, HTML, JSON, XML, YAML, TOML, SQL, NoSQL, Redis, MySQL, PostgreSQL, MongoDB, Vue, React, Angular, Svelte, Astro, Hugo, Hexo, Node, Deno, Bun, Vite, Webpack — flag suspects not in dictionary | No — report suspects, ask user to confirm or correct |
 | 7 | `tags` duplication | No duplicate entries (case-insensitive) | Yes — dedupe |
-| 8 | `title` consistency | `frontmatter.title` exactly equals first `# H1` in body | No — STOP, ask user which to keep |
-| 9 | `description` non-empty | 30–150 chars, no leading/trailing whitespace | No — if empty, auto-generate from first paragraph of body |
+| 8 | `title` / H1 consistency | `frontmatter.title` character-identical to first `# H1` in body (Step 7 generates both from `topic`, so they should match by construction) | No — STOP, ask user which to keep. Note: this should not trigger if Step 7 is followed correctly; if it triggers, Step 7 was bypassed |
+| 9 | `description` non-empty | 30–150 chars, no leading/trailing whitespace | No — if empty or <30 chars, auto-generate: take first non-heading paragraph from body, truncate to 150 chars at word boundary, append "…" if truncated |
 | 10 | `category` value | Single scalar value, not a list | Yes — unwrap `["X"]` to `X` |
 
 **Execution flow:**
@@ -107,12 +119,26 @@ After Step 7 generates frontmatter and writes the file, the main session runs a 
 1. Read the file just written in Step 7
 2. Parse YAML frontmatter (between the two `---` fences)
 3. Run all 10 checks in order
-4. Apply auto-fixes; after each auto-fix, re-validate affected checks
-5. Repeat auto-fix loop until stable (no more auto-fixable issues remain)
-6. If any non-auto-fixable check fails → STOP and report to user with the specific failing check + a suggested action
+4. Apply auto-fixes; after each auto-fix, re-validate only the checks
+   that could be affected by it (the auto-fix dependency map below
+   defines which checks interact)
+5. **Max auto-fix iterations = 3.** If after 3 passes auto-fixable
+   issues remain, STOP and report (defensive guard against infinite
+   loop from a buggy auto-fix)
+6. If any non-auto-fixable check fails → STOP and report to user with
+   the specific failing check + a suggested action
 7. If all checks pass → proceed to Step 8
 
-**Auto-fix does NOT count against the max-3 retry loop** in Step 6. Auto-fix is deterministic, low-risk, and does not require review-agent re-run.
+**Auto-fix dependency map** (which checks interact):
+
+- Check #3 (draft value) is independent — fixing it cannot break #2, #4, #6
+- Check #4 (tags format) implies Check #5 (tags count) and Check #7 (dedup) — re-validate these after #4
+- Check #2 (published date) is independent
+- Check #10 (category unwrap) is independent
+
+**Auto-fix does NOT count against the max-3 retry loop** in Step 6.
+Auto-fix is deterministic, low-risk, and does not require review-agent
+re-run.
 
 **Frontmatter Validation Report (printed to user):**
 
