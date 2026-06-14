@@ -133,7 +133,9 @@ Every code block MUST be paired with its rationale. Context window =
 4. `**Key params:**` — bullet list of `<param>` — `<meaning>` for each non-obvious parameter
 
 **Language identifier whitelist** (use exactly these tokens — review-agent
-will CRITICAL-flag any identifier not in this list):
+will CRITICAL-flag any identifier not in this list). **Source of truth:
+`scripts/validate-post.py:WHITELIST_LANGS` — keep this list in sync if you
+edit either location.**
 
 ```
 bash sh shell zsh fish

@@ -23,6 +23,11 @@ Intelligently merge technical discussion from the session into a fuwari-framewor
 ### Step 1: Check Configuration
 Read `~/.claude/skills/blog-update/config.json` to get `blogBasePath` and `fileExtension`. Use defaults if missing.
 
+**Also verify `uv` is installed** (`command -v uv`). Steps 6.5 and 7.5 use `uv run` to invoke the Python validators with PEP 723 auto-install. If `uv` is missing, the fallback (LLM runs the checks manually) is exactly the failure mode these scripts were created to eliminate — review-agent v3's P0 narrowing (A3-only) assumes `validate-post.py` pre-gates B2/D1, which the fallback does not guarantee.
+
+- **STOP and ask the user to install uv** (`curl -LsSf https://astral.sh/uv/install.sh | sh` on Linux/macOS, `winget install astral-sh.uv` on Windows). Do not proceed silently with the degraded fallback.
+- Only continue with the manual fallback if the user explicitly accepts the reduced reliability.
+
 ### Step 2: Determine topic, tags, category, and mode
 
 **Topic provided (`/blog-update <topic>`):**
@@ -58,7 +63,7 @@ merge-agent output → Write to file → validate-post.py (Step 6.5) → launch 
 ```
 
 - review-agent PASS + validate-post exit 0 → Proceed to Step 7
-- Either FAIL → Feed issues back to implement-agent for revision, loop Step 4–6 (max 3 times)
+- Either FAIL → Feed issues back to implement-agent for revision. **Step 4 ↔ 6.5 ↔ 6 share ONE 3-iteration budget** — a script-fail retry at Step 6.5 and a review-fail retry at Step 6 both decrement the same counter. After 3 total iterations across all three steps, hand off to user.
 
 ### Step 6.5: Body Validation Pass (scripted via uv)
 
@@ -80,7 +85,7 @@ uv run scripts/validate-codeblocks.py "<absolute-path-to-post>"
 - Both exit 0 → proceed to review-agent (Step 6 second half)
 - Either exits 1 → SKIP review-agent (don't waste an LLM call on a structurally broken body), loop back to Step 4 / implement-agent with the failing script's report attached. The implement-agent revision prompt should include the failing dimensions and line numbers.
 
-**Language identifier whitelist** (matches implement-agent E4): `bash sh shell zsh fish python javascript typescript go rust java kotlin swift scala c cpp csharp cs php ruby lua perl r julia sql yaml json toml ini xml html css markdown mermaid text diff dockerfile cmake makefile ps1 powershell graphql protobuf`
+**Language identifier whitelist**: see `scripts/validate-post.py:WHITELIST_LANGS` for the canonical ~50-token list (bash, python, javascript, typescript, go, rust, java, kotlin, swift, scala, c, cpp, sql, yaml, json, toml, html, css, markdown, mermaid, text, dockerfile, etc.). `prompts/implement-agent.md` E4 also enumerates the same set; the script is the single source of truth.
 
 **Why scripted, not LLM:** the B/D1/C2 dimensions are pure structural / regex checks. They are 100% deterministic. Delegating them to review-agent (LLM) historically caused two failure modes: (a) LLM hallucinating that an identifier is in the whitelist when it isn't, (b) LLM missing `<system-reminder>` tags because they look like normal XML. Both classes are eliminated by the script.
 
@@ -103,7 +108,8 @@ Main session generates frontmatter inline using the template below, generates th
 1. Take `topic` as-is → use for `title` field AND as the H1 heading text
 2. Generate the 6-field frontmatter (see template below)
 3. Generate H1: `# <topic as-is>` (must match `title` character-for-character)
-4. Concatenate: `frontmatter + "\n\n" + H1 + "\n\n" + body` → write to file
+4. Strip implement-agent's trailing HTML comments from body before concatenation: `<!-- template: xxx -->` and `<!-- signal-stats: ... -->`. They were consumed by review-agent at Step 6 (template detection); leaving them in leaks metadata into RSS/JSON feeds. Use `sed -i -e '/^<!-- template:/d' -e '/^<!-- signal-stats:/d'` on the post file, or write the body without those trailing lines.
+5. Concatenate: `frontmatter + "\n\n" + H1 + "\n\n" + body` → write to file
 
 **Critical:** the H1 text MUST be character-identical to `title`. The Step 7.5
 Check #8 verifies this. If they differ, the skill will hard-stop and ask the

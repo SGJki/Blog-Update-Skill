@@ -202,7 +202,7 @@ def serialize_frontmatter(fm):
 
     lines = [
         "---",
-        f"title: {title_str}",
+        f"title: {serialize_description(title_str)}",
         f"published: {pub_str}",
         f"description: {serialize_description(desc)}",
         f"tags: [{tags_str}]",
@@ -313,9 +313,11 @@ def check_tags_dedup(fm):
 
 def check_title_h1(fm, body):
     title = fm.get("title")
+    if title is None:
+        return True, "", None  # Check #1 handles missing title
     h1 = find_h1(body)
-    if title is None or h1 is None:
-        return True, "", None
+    if h1 is None:
+        return False, "Step 7 did not generate H1 (body has no '# ' heading)", None
     if title != h1:
         return False, f'frontmatter title="{title}" vs body H1="{h1}"', None
     return True, "", None
@@ -472,6 +474,10 @@ def main():
         print(f"Frontmatter Validation: PASS ({len(fixes)} auto-fixes applied)")
         for fix in fixes:
             print(f"  - {fix}")
+        if len(fixes) >= 4:
+            print("")
+            print(f"WARN: {len(fixes)} auto-fixes applied — Step 7 frontmatter generation quality is suspect.")
+            print("      Consider revisiting Step 7 prompt or input topic/tags/category to reduce drift.")
         sys.exit(0)
     else:
         print("Frontmatter Validation: FAIL")
