@@ -93,43 +93,55 @@ draft: false
 - `tags: [Git, Tools]` (unquoted) → use `tags: ["Git", "Tools"]` (quoted strings)
 - Generating H1 from body's first sentence instead of from `topic` → use `topic` exactly
 
-### Step 7.5: Frontmatter Validation Pass (deterministic, no subagent)
+### Step 7.5: Frontmatter Validation Pass (scripted via uv)
 
-After Step 7 generates frontmatter and writes the file, the main session runs a programmatic validation pass. This catches schema errors that review-agent cannot see — review runs in Step 6, before frontmatter exists. Frontmatter bugs in real outputs (tag typos like `Authentation`, `draft: False` capitalized, missing `description`, title/H1 mismatch) all escaped review-agent in past versions because review-agent literally could not see the frontmatter.
+After Step 7 generates frontmatter and writes the file, the main session invokes a Python script that performs all 10 checks programmatically. This catches schema errors that review-agent cannot see — review runs in Step 6, before frontmatter exists. Frontmatter bugs in real outputs (tag typos like `Authentation`, `draft: False` capitalized, missing `description`, title/H1 mismatch) all escaped review-agent in past versions because review-agent literally could not see the frontmatter.
 
-**Why deterministic:** frontmatter is a fixed 6-field YAML schema. It does not need LLM judgment. Running these checks as a programmatic pass avoids consuming the max-3 retry loop budget on trivially fixable issues.
+**Why scripted, not LLM-as-parser:** frontmatter is a fixed 6-field YAML schema. Delegating parse-and-check to the LLM (the old behavior) reproduces the same class of bugs the check was meant to catch — LLM miscounts list items, hallucinates edit-distance, and silently accepts malformed YAML. PyYAML parses the file deterministically; the check logic is plain Python.
 
-**Checks (run in order, top to bottom):**
+**Invocation** (run from the skill's base directory):
+
+```bash
+uv run scripts/validate-frontmatter.py "<absolute-path-to-post>"
+```
+
+`uv run` reads the PEP 723 inline metadata at the top of the script and auto-installs `pyyaml>=6.0` on first run (cached thereafter — instant). No manual pip install, no venv management. The script:
+
+- Reads the post file, parses frontmatter via `yaml.safe_load`
+- Runs all 10 checks below in order
+- Applies auto-fixes (up to 3 iterations, see dependency map below)
+- Writes the fixed file in-place (only if any auto-fix was applied)
+- Prints a PASS or FAIL report to stdout
+- Exit codes: `0` = PASS, `1` = FAIL (skill must pause), `2` = ERROR (file missing / unparseable YAML)
+
+**Fallback (if uv is not installed):** the main session runs the 10 checks manually by reading the file and applying the table below. Warn the user that this fallback is less reliable (LLM-as-parser is the failure mode this step was created to eliminate). Recommend installing uv.
+
+**Checks** (run in order, top to bottom):
 
 | # | Check | Rule | Auto-fix? |
 |---|-------|------|-----------|
-| 1 | Required fields present | `title`, `published`, `description`, `tags`, `category`, `draft` all exist | No — STOP and ask user |
+| 1 | Required fields present | `title`, `published`, `tags`, `category`, `draft` all exist (description handled by #9) | No — STOP and ask user |
 | 2 | `published` format | Strict `YYYY-MM-DD` (e.g., `2026-04-07`) | Yes — replace with today's date |
-| 3 | `draft` value | Lowercase `false` (not `False`, not `no`, not `0`, not `true`) | Yes — rewrite to `false` |
-| 4 | `tags` format | 2–5 entries, all double-quoted strings: `["A", "B"]` | Yes — add quotes + normalize spacing |
+| 3 | `draft` value | Lowercase `false` (PyYAML parses `false`/`False`/`no` all as Python `False`; serializer always writes lowercase) | Yes — rewrite to `false` |
+| 4 | `tags` format | 2–5 entries, all strings (serializer always emits double-quoted form `["A", "B"]`) | Yes — coerce non-strings to strings |
 | 5 | `tags` count | Between 2 and 5 inclusive | No — STOP if <2 or >5 |
-| 6 | `tags` spelling | Min-edit-distance <2 from this tech-term dictionary: Git, GitHub, GitLab, Python, JavaScript, TypeScript, Go, Rust, Java, Kotlin, Swift, Scala, AI, ML, LLM, Web, DevOps, Auth, Authentication, Authorization, Tools, RPC, DB, Database, HTTP, HTTPS, API, REST, GraphQL, Docker, Kubernetes, Linux, MacOS, Windows, Architecture, Frontend, Backend, Fullstack, JWT, OAuth, SSL, TLS, CSS, HTML, JSON, XML, YAML, TOML, SQL, NoSQL, Redis, MySQL, PostgreSQL, MongoDB, Vue, React, Angular, Svelte, Astro, Hugo, Hexo, Node, Deno, Bun, Vite, Webpack — flag suspects not in dictionary | No — report suspects, ask user to confirm or correct |
-| 7 | `tags` duplication | No duplicate entries (case-insensitive) | Yes — dedupe |
-| 8 | `title` / H1 consistency | `frontmatter.title` character-identical to first `# H1` in body (Step 7 generates both from `topic`, so they should match by construction) | No — STOP, ask user which to keep. Note: this should not trigger if Step 7 is followed correctly; if it triggers, Step 7 was bypassed |
-| 9 | `description` non-empty | 30–150 chars, no leading/trailing whitespace | No — if empty or <30 chars, auto-generate: take first non-heading paragraph from body, truncate to 150 chars at word boundary, append "…" if truncated |
+| 6 | `tags` spelling | Flag tags within Levenshtein edit distance 1–2 of a dictionary word (typo signature). Skip non-ASCII tags (CJK etc.) and tags length ≤3 (short acronyms are inherently noisy). Dictionary: Git, GitHub, GitLab, Python, JavaScript, TypeScript, Go, Rust, Java, Kotlin, Swift, Scala, AI, ML, LLM, Web, DevOps, Auth, Authentication, Authorization, Tools, RPC, DB, Database, HTTP, HTTPS, API, REST, GraphQL, Docker, Kubernetes, Linux, MacOS, Windows, Architecture, Frontend, Backend, Fullstack, JWT, OAuth, SSL, TLS, CSS, HTML, JSON, XML, YAML, TOML, SQL, NoSQL, Redis, MySQL, PostgreSQL, MongoDB, Vue, React, Angular, Svelte, Astro, Hugo, Hexo, Node, Deno, Bun, Vite, Webpack | No — report suspects, ask user to confirm or correct |
+| 7 | `tags` duplication | No duplicate entries (case-insensitive) | Yes — dedupe (preserve first-seen order) |
+| 8 | `title` / H1 consistency | `frontmatter.title` character-identical to first `# H1` in body. Code blocks (` ``` `) are skipped when searching for H1, so a `# comment` inside a fence is not mistaken for the body's H1. | No — STOP, ask user which to keep. Note: this should not trigger if Step 7 is followed correctly; if it triggers, Step 7 was bypassed |
+| 9 | `description` non-empty | 30–150 chars, no leading/trailing whitespace. Missing field, empty string, and <30 chars are all treated identically — auto-generate. | Yes — if missing/empty/short, take first non-heading non-codeblock paragraph from body, truncate to 150 chars at word boundary, append "…" if truncated. If >150 chars, truncate the same way. If leading/trailing whitespace, strip. |
 | 10 | `category` value | Single scalar value, not a list | Yes — unwrap `["X"]` to `X` |
 
-**Execution flow:**
+**Execution flow (handled by the script):**
 
 1. Read the file just written in Step 7
-2. Parse YAML frontmatter (between the two `---` fences)
-3. Run all 10 checks in order
-4. Apply auto-fixes; after each auto-fix, re-validate only the checks
-   that could be affected by it (the auto-fix dependency map below
-   defines which checks interact)
-5. **Max auto-fix iterations = 3.** If after 3 passes auto-fixable
-   issues remain, STOP and report (defensive guard against infinite
-   loop from a buggy auto-fix)
-6. If any non-auto-fixable check fails → STOP and report to user with
-   the specific failing check + a suggested action
-7. If all checks pass → proceed to Step 8
+2. Parse YAML frontmatter via PyYAML (fail with parse error if malformed)
+3. Run all 10 checks; collect failures
+4. If any non-auto-fixable check (#1, #5, #6, #8) fails → STOP and report
+5. Apply auto-fixes; re-run all checks; repeat up to 3 iterations
+6. After max iterations or convergence: if still failing on auto-fixable → STOP; otherwise PASS
+7. If any auto-fix was applied, rewrite the file in-place with the canonical 6-field serialized form (preserves any extra fields the user added beyond the canonical 6)
 
-**Auto-fix dependency map** (which checks interact):
+**Auto-fix dependency map** (which checks interact — handled implicitly by the script's re-validation loop):
 
 - Check #3 (draft value) is independent — fixing it cannot break #2, #4, #6
 - Check #4 (tags format) implies Check #5 (tags count) and Check #7 (dedup) — re-validate these after #4
@@ -140,7 +152,7 @@ After Step 7 generates frontmatter and writes the file, the main session runs a 
 Auto-fix is deterministic, low-risk, and does not require review-agent
 re-run.
 
-**Frontmatter Validation Report (printed to user):**
+**Frontmatter Validation Report** (printed by the script to stdout):
 
 On success:
 
@@ -155,8 +167,18 @@ On failure:
 Frontmatter Validation: FAIL
   - Check #<N> failed: <check name>
     <specific detail>
-  Action required: <what user must decide>
+  Action required: reconcile manually or adjust topic/tags/category and re-run
   Skill paused — waiting for user input.
+```
+
+**Testing the script standalone:**
+
+```bash
+# Dry-run (report only, no file changes):
+uv run scripts/validate-frontmatter.py <post-file> --dry-run
+
+# Apply fixes in-place:
+uv run scripts/validate-frontmatter.py <post-file>
 ```
 
 ### Step 8: Report Completion
