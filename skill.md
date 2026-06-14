@@ -62,30 +62,29 @@ merge-agent output → Write to file → validate-post.py (Step 6.5) → launch 
 
 ### Step 6.5: Body Validation Pass (scripted via uv)
 
-After Step 6 writes the file, also invoke the body validator. This catches 6 deterministic dimensions that review-agent no longer covers (delegated to script for reliability — LLM miscounts fences, hallucinates whitelist membership, misses subtle session-leak patterns like `<system-reminder>` and `<user>:` role markers).
+After Step 6 writes the file, invoke TWO body validators in sequence. Together they catch 7 deterministic dimensions that review-agent no longer covers (delegated to scripts for reliability — LLM miscounts fences, hallucinates whitelist membership, misses subtle session-leak patterns, and cannot reliably "mental lex" code for syntax errors).
 
 **Invocation** (run from the skill's base directory):
 
 ```bash
 uv run scripts/validate-post.py "<absolute-path-to-post>"
+uv run scripts/validate-codeblocks.py "<absolute-path-to-post>"
 ```
 
-The script (pure stdlib, no external deps, instant `uv run`):
-
-- Strips frontmatter, checks body only
-- Runs 6 dimensions: **B1** heading structure, **B2** code blocks (empty/non-whitelist lang, unclosed fence, box-drawing outside `text`), **B3** list markers (mixed `-`/`*`/`+`), **B4** paragraph separation (leading spaces, trailing-whitespace ratio), **D1** filter effectiveness (tool artifacts, role markers, confirmation dialogs, stack-trace middle frames, greetings), **C2** link integrity (bare URLs, image without alt, broken internal `.md` links)
-- Exit codes: `0` = no CRITICAL/MAJOR (MINOR allowed), `1` = CRITICAL or MAJOR, `2` = ERROR
+- `validate-post.py` (pure stdlib, instant `uv run`): **B1** heading structure, **B2** code blocks format (empty/non-whitelist lang, unclosed fence, box-drawing outside `text`), **B3** list markers (mixed `-`/`*`/`+`), **B4** paragraph separation (leading spaces, trailing-whitespace ratio), **D1** filter effectiveness (tool artifacts, role markers, confirmation dialogs, stack-trace middle frames, greetings), **C2** link integrity (bare URLs, image without alt, broken internal `.md` links)
+- `validate-codeblocks.py` (depends on `pyyaml>=6.0`, auto-installed via PEP 723): **C1-syntax** — runs actual parsers on every code block (`ast.parse` for python, `json.loads` for json, `yaml.safe_load` for yaml, `bash -n` for bash/sh/shell/zsh). Non-parsable languages (JS/TS/Go/Rust/etc.) are skipped silently. Template-placeholder blocks (`<your-name>`, `YOUR_API_KEY`, standalone `...`) are exempted to avoid false positives on illustrative pseudo-code.
+- Both scripts: exit `0` = no CRITICAL/MAJOR (MINOR allowed), `1` = CRITICAL or MAJOR, `2` = ERROR. Line numbers are file-relative (count frontmatter lines).
 
 **Gate logic:**
 
-- Exit 0 → proceed to review-agent (Step 6 second half)
-- Exit 1 → SKIP review-agent (don't waste an LLM call on a structurally broken body), loop back to Step 4 / implement-agent with the script's report attached. The implement-agent revision prompt should include the failing dimensions and line numbers.
+- Both exit 0 → proceed to review-agent (Step 6 second half)
+- Either exits 1 → SKIP review-agent (don't waste an LLM call on a structurally broken body), loop back to Step 4 / implement-agent with the failing script's report attached. The implement-agent revision prompt should include the failing dimensions and line numbers.
 
 **Language identifier whitelist** (matches implement-agent E4): `bash sh shell zsh fish python javascript typescript go rust java kotlin swift scala c cpp csharp cs php ruby lua perl r julia sql yaml json toml ini xml html css markdown mermaid text diff dockerfile cmake makefile ps1 powershell graphql protobuf`
 
 **Why scripted, not LLM:** the B/D1/C2 dimensions are pure structural / regex checks. They are 100% deterministic. Delegating them to review-agent (LLM) historically caused two failure modes: (a) LLM hallucinating that an identifier is in the whitelist when it isn't, (b) LLM missing `<system-reminder>` tags because they look like normal XML. Both classes are eliminated by the script.
 
-**Fallback (if uv is not installed):** the main session runs the 6 dimensions manually by reading the file and applying the table below. Warn the user that this is less reliable.
+**Fallback (if uv is not installed):** the main session runs the 6 validate-post.py dimensions manually by reading the file and applying the table below. C1-syntax (validate-codeblocks.py) cannot be done manually without language parsers — skip it and warn the user that code-syntax errors may go undetected.
 
 | Dim | Check | Severity |
 |-----|-------|----------|
@@ -226,7 +225,7 @@ Confirm to the user: file path, operation type (create/merge), and merge statist
 |-------|------|-------------|----------------|
 | implement-agent | Background | prompts/implement-agent.md | Generate raw markdown from session context |
 | merge-agent | Background | prompts/merge-agent.md | Multi-granularity merge of new + existing content |
-| review-agent | Background | prompts/review-agent.md | Quality gate — semantic review only (A1–A5, C1, C3, D2, D3) |
+| review-agent | Background | prompts/review-agent.md | Quality gate — semantic review only (A1–A5, C1-semantic, C3, D2, D3) |
 
 Frontmatter generation is done by the main session (Step 7) — no subagent needed for a 6-field YAML template.
 
@@ -237,9 +236,10 @@ Frontmatter generation is done by the main session (Step 7) — no subagent need
 | Script | Step | Purpose | Deps |
 |--------|------|---------|------|
 | `scripts/validate-post.py` | 6.5 | Body validation: B1/B2/B3/B4 (format), D1 (session noise), C2 (links) — gates review-agent | pure stdlib |
+| `scripts/validate-codeblocks.py` | 6.5 | Code block syntax: C1-syntax actual parser checks (python `ast.parse`, json `json.loads`, yaml `yaml.safe_load`, bash `bash -n`) — gates review-agent | `pyyaml>=6.0` |
 | `scripts/validate-frontmatter.py` | 7.5 | Frontmatter validation: 10 checks + 6 auto-fixes on 6-field fuwari schema | `pyyaml>=6.0` |
 
-Both invoked via `uv run` (PEP 723 inline metadata auto-installs deps on first run, cached thereafter — invisible to user).
+All three invoked via `uv run` (PEP 723 inline metadata auto-installs deps on first run, cached thereafter — invisible to user).
 
 **Fallback** if `uv` is not installed: main session runs the checks manually per the tables in Step 6.5 / 7.5. Warn user this is less reliable (LLM-as-parser / LLM-as-regex is the failure mode these scripts were created to eliminate).
 

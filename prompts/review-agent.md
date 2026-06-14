@@ -9,15 +9,23 @@ is handled separately by main session (Step 7.5), and structural format
 `scripts/validate-post.py` (Step 6.5) before this agent runs.
 
 **In-scope dimensions** (review-agent owns these): A1, A2, A3, A4, A5
-(Content Quality), C1 (Command Executability), C3 (Terminology
+(Content Quality), C1-semantic (Command Executability — undefined vars,
+missing context, relative-path pitfalls), C3 (Terminology
 Consistency), D2 (Failed-Path Completeness), D3 (Template Compliance).
 
-**Out-of-scope dimensions** (handled by `validate-post.py`, do NOT
-re-check): B1 (Heading Structure), B2 (Code Blocks), B3 (List Format),
-B4 (Paragraph Separation), C2 (Link Integrity), D1 (Filter
-Effectiveness). If you observe issues in these dimensions, ignore them
-silently — they are caught by the deterministic script with higher
-reliability than LLM judgment.
+**Out-of-scope dimensions** (handled by deterministic scripts, do NOT
+re-check):
+- `validate-post.py`: B1 (Heading Structure), B2 (Code Blocks format),
+  B3 (List Format), B4 (Paragraph Separation), C2 (Link Integrity),
+  D1 (Filter Effectiveness)
+- `validate-codeblocks.py`: C1-syntax (actual parser-based syntax
+  errors in python/json/yaml/bash code blocks)
+
+If you observe issues in out-of-scope dimensions, ignore them silently —
+they are caught by deterministic scripts with higher reliability than
+LLM judgment. Specifically, do NOT attempt to "mental lex" code blocks
+for syntax errors; `validate-codeblocks.py` runs `ast.parse` /
+`json.loads` / `yaml.safe_load` / `bash -n` on every parsable block.
 
 ## Input
 - **topic**: <topic>
@@ -102,17 +110,24 @@ mechanically — judge by reading):
 
 ## Category C — Technical Integrity (15%)
 
-### C1. Command Executability (10%)
+### C1. Command Executability — Semantic (10%)
 
-**Rule**: All `bash`/`sh`/`python` code blocks must pass syntax check
-(mental lex — no need to actually run).
+**Rule**: review-agent owns only the *semantic* C1 checks (context-dependent, require reading surrounding prose). Pure syntax errors (unbalanced quotes/brackets, Python `ast.parse` failures, JSON `json.loads` failures, YAML `yaml.safe_load` failures, `bash -n` failures) are pre-gated by `validate-codeblocks.py` — review-agent never sees content with those defects.
 
-- Unbalanced quotes / brackets in command → CRITICAL
-- Undefined shell variable in non-template context → MAJOR
-- Python block with syntax error → CRITICAL
+In-scope (semantic) sub-checks:
+
+- Undefined shell variable used in non-template context (e.g. `$FOO`
+  referenced without prior `export` or `read`) → MAJOR
 - Command references file path that obviously won't exist in reader's env
-  without prior `cd` or setup → MAJOR
+  without prior `cd` or setup (e.g. `cat data/input.csv` with no setup) → MAJOR
 - Relative path used without explaining working directory → MINOR
+- Shell pipeline that silently swallows errors (missing `set -e`,
+  unguarded `|| true`) → MINOR
+
+**Out-of-scope (handled by `validate-codeblocks.py`):** unbalanced
+quotes/brackets, Python syntax errors, JSON parse errors, YAML parse
+errors, bash `-n` failures. Do not flag these — the script already
+caught them or the content already passed.
 
 ### C3. Terminology Consistency (5%)
 
