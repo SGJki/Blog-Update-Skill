@@ -1,10 +1,23 @@
-# review-agent: Content Quality Review Expert (v2)
+# review-agent: Content Quality Review Expert (v3)
 
 ## Task
-Review merged blog content on **15 dimensions across 4 categories**.
+Review merged blog content on **9 dimensions across 3 categories**.
 Output a structured report with score, severity, location, and
 before/after diff. This agent reviews BODY ONLY — frontmatter validation
-is handled separately by main session (Step 7.5).
+is handled separately by main session (Step 7.5), and structural format
+/ session-noise / link-integrity checks are handled by
+`scripts/validate-post.py` (Step 6.5) before this agent runs.
+
+**In-scope dimensions** (review-agent owns these): A1, A2, A3, A4, A5
+(Content Quality), C1 (Command Executability), C3 (Terminology
+Consistency), D2 (Failed-Path Completeness), D3 (Template Compliance).
+
+**Out-of-scope dimensions** (handled by `validate-post.py`, do NOT
+re-check): B1 (Heading Structure), B2 (Code Blocks), B3 (List Format),
+B4 (Paragraph Separation), C2 (Link Integrity), D1 (Filter
+Effectiveness). If you observe issues in these dimensions, ignore them
+silently — they are caught by the deterministic script with higher
+reliability than LLM judgment.
 
 ## Input
 - **topic**: <topic>
@@ -24,12 +37,14 @@ is handled separately by main session (Step 7.5).
 - **MINOR**: −2 each
 - Minimum score: 0
 
-**P0 override:** a single CRITICAL in "Accuracy" (A3), "Code Blocks" (B2),
-or "Filter Effectiveness" (D1) forces FAIL regardless of total score.
+**P0 override:** a single CRITICAL in "Accuracy" (A3) forces FAIL
+regardless of total score.
 
-Rationale: A3 wrong-claim, B2 broken-code-block, and D1 leaked session
-noise (e.g. `<system-reminder>`, role markers) all break the rendered
-post in ways no amount of other strengths can compensate for.
+Rationale: A3 wrong-claim breaks the rendered post in ways no amount of
+other strengths can compensate for. (B2 broken-code-block and D1 leaked
+session noise were P0 in v2 but are now pre-gated by validate-post.py
+before review-agent runs — review-agent never sees content with those
+defects.)
 
 ---
 
@@ -85,53 +100,7 @@ mechanically — judge by reading):
 
 ---
 
-## Category B — Markdown Format (25%)
-
-### B1. Heading Structure (8%)
-
-**Rules**:
-
-- H1 (`#`) MUST NOT appear in body (main session generates it from title) → CRITICAL if found
-- H2 (`##`) directly followed by another H2 with no H3 or content between → CRITICAL
-- Heading level jumps more than 1 (e.g., H2 → H4) → MAJOR
-- Empty heading (heading text is empty) → CRITICAL
-- Heading text duplicates a parent heading → MINOR
-
-### B2. Code Blocks (10%)
-
-**Rules**:
-
-- Empty language identifier → CRITICAL (P0 override)
-- Identifier not in whitelist (see implement-agent E4: bash sh python
-  javascript typescript go rust java kotlin swift sql yaml json toml
-  ini xml html css markdown mermaid text diff dockerfile) → CRITICAL (P0 override)
-- Unclosed code fence (odd number of ` ``` ` markers) → CRITICAL
-- Box-drawing chars (`┌─┐│└┘├┤`) outside a `text` code block → MAJOR
-- Code block ends with trailing blank line inside fence → MINOR
-
-### B3. List Format (4%)
-
-**Rules**:
-
-- Mixed list markers in same list (e.g., `-` and `*` together) → MINOR
-- A list item that exists only to pad count to a round number (item
-  reads as filler, restates a prior item, or is vaguer than the others)
-  → MINOR
-- Inconsistent indentation in nested list → MINOR
-- List item without blank line before/after → MINOR
-
-### B4. Paragraph Separation (3%)
-
-**Rules**:
-
-- Paragraph starts with 2+ leading spaces → MINOR (session paste artifact)
-- No blank line between paragraphs → MINOR
-- Trailing whitespace on >20% of lines → MINOR
-- Lines with only spaces/tabs (not truly empty) → MINOR
-
----
-
-## Category C — Technical Integrity (20%)
+## Category C — Technical Integrity (15%)
 
 ### C1. Command Executability (10%)
 
@@ -145,16 +114,6 @@ mechanically — judge by reading):
   without prior `cd` or setup → MAJOR
 - Relative path used without explaining working directory → MINOR
 
-### C2. Link/Resource Integrity (5%)
-
-**Rule**:
-
-- Internal links (`./xxx.md`, `../xxx.md`) — flag if target likely missing → MAJOR
-- External links — flag if URL is obviously malformed → MAJOR
-- Bare URLs (not wrapped in `<>` or `[text]()`) → MINOR
-- Relative path errors → MAJOR
-- Image references without alt text → MINOR
-
 ### C3. Terminology Consistency (5%)
 
 **Rule**: Same concept must use same spelling throughout.
@@ -167,18 +126,7 @@ mechanically — judge by reading):
 
 ---
 
-## Category D — Extraction Effectiveness (15%)
-
-### D1. Filter Effectiveness (5%)
-
-**Rule**: Content must NOT contain session noise.
-
-- Confirmation dialogs present ("Continue?", "yes/no") → CRITICAL (P0 override)
-- Stack traces pasted wholesale (with `at xxx.xxx` middle frames) → MAJOR
-- Tool-call artifacts (`<tool_result>`, `<command-name>`,
-  `<system-reminder>`) → CRITICAL (P0 override)
-- Greetings / thank-yous → MAJOR
-- Role markers (`<user>:`, `<assistant>:`) → CRITICAL (P0 override)
+## Category D — Extraction Effectiveness (10%)
 
 ### D2. Failed-Path Completeness (5%)
 
@@ -220,7 +168,7 @@ implement-agent did not produce.
 **Score**: <N>/100  (threshold: 85)
 **Verdict**: PASS | FAIL | ESCALATE
 **Template detected**: <how-to | concept | postmortem | unknown>
-**P0 override**: <none | "Accuracy CRITICAL" | "Code Blocks CRITICAL">
+**P0 override**: <none | "Accuracy CRITICAL">
 
 ## Issues (sorted: CRITICAL → MAJOR → MINOR)
 

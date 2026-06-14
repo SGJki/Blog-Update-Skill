@@ -54,11 +54,47 @@ Pass new content from implement-agent and existing file path (if it exists). Per
 **Critical ordering:** Write merged content to file BEFORE launching review-agent. review-agent reads the file to verify content — if Write happens after launch, review-agent reads the OLD file.
 
 ```
-merge-agent output → Write to file → launch review-agent → reads NEW file ✓
+merge-agent output → Write to file → validate-post.py (Step 6.5) → launch review-agent → reads NEW file ✓
 ```
 
-- PASS: Proceed to Step 7
-- FAIL: Feed issues back to implement-agent for revision, loop Step 4–6 (max 3 times)
+- review-agent PASS + validate-post exit 0 → Proceed to Step 7
+- Either FAIL → Feed issues back to implement-agent for revision, loop Step 4–6 (max 3 times)
+
+### Step 6.5: Body Validation Pass (scripted via uv)
+
+After Step 6 writes the file, also invoke the body validator. This catches 6 deterministic dimensions that review-agent no longer covers (delegated to script for reliability — LLM miscounts fences, hallucinates whitelist membership, misses subtle session-leak patterns like `<system-reminder>` and `<user>:` role markers).
+
+**Invocation** (run from the skill's base directory):
+
+```bash
+uv run scripts/validate-post.py "<absolute-path-to-post>"
+```
+
+The script (pure stdlib, no external deps, instant `uv run`):
+
+- Strips frontmatter, checks body only
+- Runs 6 dimensions: **B1** heading structure, **B2** code blocks (empty/non-whitelist lang, unclosed fence, box-drawing outside `text`), **B3** list markers (mixed `-`/`*`/`+`), **B4** paragraph separation (leading spaces, trailing-whitespace ratio), **D1** filter effectiveness (tool artifacts, role markers, confirmation dialogs, stack-trace middle frames, greetings), **C2** link integrity (bare URLs, image without alt, broken internal `.md` links)
+- Exit codes: `0` = no CRITICAL/MAJOR (MINOR allowed), `1` = CRITICAL or MAJOR, `2` = ERROR
+
+**Gate logic:**
+
+- Exit 0 → proceed to review-agent (Step 6 second half)
+- Exit 1 → SKIP review-agent (don't waste an LLM call on a structurally broken body), loop back to Step 4 / implement-agent with the script's report attached. The implement-agent revision prompt should include the failing dimensions and line numbers.
+
+**Language identifier whitelist** (matches implement-agent E4): `bash sh shell zsh fish python javascript typescript go rust java kotlin swift scala c cpp csharp cs php ruby lua perl r julia sql yaml json toml ini xml html css markdown mermaid text diff dockerfile cmake makefile ps1 powershell graphql protobuf`
+
+**Why scripted, not LLM:** the B/D1/C2 dimensions are pure structural / regex checks. They are 100% deterministic. Delegating them to review-agent (LLM) historically caused two failure modes: (a) LLM hallucinating that an identifier is in the whitelist when it isn't, (b) LLM missing `<system-reminder>` tags because they look like normal XML. Both classes are eliminated by the script.
+
+**Fallback (if uv is not installed):** the main session runs the 6 dimensions manually by reading the file and applying the table below. Warn the user that this is less reliable.
+
+| Dim | Check | Severity |
+|-----|-------|----------|
+| B1 | H1 in body, H2 directly followed by H2, level jump >1, empty heading | CRITICAL / CRITICAL / MAJOR / CRITICAL |
+| B2 | empty lang id, non-whitelist lang, unclosed fence, box-drawing outside `text` block | CRITICAL / CRITICAL / CRITICAL / MAJOR |
+| B3 | mixed list markers in same indent group | MINOR |
+| B4 | 2+ leading spaces (non-list/heading), trailing whitespace on >20% of lines | MINOR |
+| D1 | `<system-reminder>`/`<tool_result>`/`<command-name>`/`<task-notification>` tags, `<user>:`/`<assistant>:` role markers, `[y/N]` confirmation, stack-trace `at xxx(` middle frames, lone greetings, retry notifications | CRITICAL / CRITICAL / CRITICAL / MAJOR / MAJOR / MAJOR |
+| C2 | bare URL (not in `<>` or `[text]()`), image `![]()` without alt, broken `](./relative.md)` link, malformed URL | MINOR / MINOR / MAJOR / MAJOR |
 
 ### Step 7: Generate frontmatter and write final content
 Main session generates frontmatter inline using the template below, generates the H1 heading (since implement-agent must NOT output H1), and prepends both to the file (Edit or Write). No subagent needed — frontmatter and H1 are deterministic.
@@ -190,11 +226,22 @@ Confirm to the user: file path, operation type (create/merge), and merge statist
 |-------|------|-------------|----------------|
 | implement-agent | Background | prompts/implement-agent.md | Generate raw markdown from session context |
 | merge-agent | Background | prompts/merge-agent.md | Multi-granularity merge of new + existing content |
-| review-agent | Background | prompts/review-agent.md | Quality gate — content + format review |
+| review-agent | Background | prompts/review-agent.md | Quality gate — semantic review only (A1–A5, C1, C3, D2, D3) |
 
 Frontmatter generation is done by the main session (Step 7) — no subagent needed for a 6-field YAML template.
 
 **All write operations are performed by the main session, never by subagents.**
+
+## Script Reference
+
+| Script | Step | Purpose | Deps |
+|--------|------|---------|------|
+| `scripts/validate-post.py` | 6.5 | Body validation: B1/B2/B3/B4 (format), D1 (session noise), C2 (links) — gates review-agent | pure stdlib |
+| `scripts/validate-frontmatter.py` | 7.5 | Frontmatter validation: 10 checks + 6 auto-fixes on 6-field fuwari schema | `pyyaml>=6.0` |
+
+Both invoked via `uv run` (PEP 723 inline metadata auto-installs deps on first run, cached thereafter — invisible to user).
+
+**Fallback** if `uv` is not installed: main session runs the checks manually per the tables in Step 6.5 / 7.5. Warn user this is less reliable (LLM-as-parser / LLM-as-regex is the failure mode these scripts were created to eliminate).
 
 ## Non-Obvious Error Handling
 
