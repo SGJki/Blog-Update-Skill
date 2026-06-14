@@ -81,6 +81,58 @@ draft: false
 - `published: true/false` → use `draft: false`
 - `tags: [Git, Tools]` (unquoted) → use `tags: ["Git", "Tools"]` (quoted strings)
 
+### Step 7.5: Frontmatter Validation Pass (deterministic, no subagent)
+
+After Step 7 generates frontmatter and writes the file, the main session runs a programmatic validation pass. This catches schema errors that review-agent cannot see — review runs in Step 6, before frontmatter exists. Frontmatter bugs in real outputs (tag typos like `Authentation`, `draft: False` capitalized, missing `description`, title/H1 mismatch) all escaped review-agent in past versions because review-agent literally could not see the frontmatter.
+
+**Why deterministic:** frontmatter is a fixed 6-field YAML schema. It does not need LLM judgment. Running these checks as a programmatic pass avoids consuming the max-3 retry loop budget on trivially fixable issues.
+
+**Checks (run in order, top to bottom):**
+
+| # | Check | Rule | Auto-fix? |
+|---|-------|------|-----------|
+| 1 | Required fields present | `title`, `published`, `description`, `tags`, `category`, `draft` all exist | No — STOP and ask user |
+| 2 | `published` format | Strict `YYYY-MM-DD` (e.g., `2026-04-07`) | Yes — replace with today's date |
+| 3 | `draft` value | Lowercase `false` (not `False`, not `no`, not `0`, not `true`) | Yes — rewrite to `false` |
+| 4 | `tags` format | 2–5 entries, all double-quoted strings: `["A", "B"]` | Yes — add quotes + normalize spacing |
+| 5 | `tags` count | Between 2 and 5 inclusive | No — STOP if <2 or >5 |
+| 6 | `tags` spelling | Min-edit-distance <2 from a tech-term dictionary (Git, Web, AI, DevOps, Auth, Authentication, Tools, RPC, DB, Architecture, etc.); flag suspects | No — report suspects, ask user to confirm or correct |
+| 7 | `tags` duplication | No duplicate entries (case-insensitive) | Yes — dedupe |
+| 8 | `title` consistency | `frontmatter.title` exactly equals first `# H1` in body | No — STOP, ask user which to keep |
+| 9 | `description` non-empty | 30–150 chars, no leading/trailing whitespace | No — if empty, auto-generate from first paragraph of body |
+| 10 | `category` value | Single scalar value, not a list | Yes — unwrap `["X"]` to `X` |
+
+**Execution flow:**
+
+1. Read the file just written in Step 7
+2. Parse YAML frontmatter (between the two `---` fences)
+3. Run all 10 checks in order
+4. Apply auto-fixes; after each auto-fix, re-validate affected checks
+5. Repeat auto-fix loop until stable (no more auto-fixable issues remain)
+6. If any non-auto-fixable check fails → STOP and report to user with the specific failing check + a suggested action
+7. If all checks pass → proceed to Step 8
+
+**Auto-fix does NOT count against the max-3 retry loop** in Step 6. Auto-fix is deterministic, low-risk, and does not require review-agent re-run.
+
+**Frontmatter Validation Report (printed to user):**
+
+On success:
+
+```
+Frontmatter Validation: PASS (N auto-fixes applied)
+  - <summary of each auto-fix>
+```
+
+On failure:
+
+```
+Frontmatter Validation: FAIL
+  - Check #<N> failed: <check name>
+    <specific detail>
+  Action required: <what user must decide>
+  Skill paused — waiting for user input.
+```
+
 ### Step 8: Report Completion
 Confirm to the user: file path, operation type (create/merge), and merge statistics.
 
