@@ -24,8 +24,12 @@ is handled separately by main session (Step 7.5).
 - **MINOR**: −2 each
 - Minimum score: 0
 
-**P0 override:** a single CRITICAL in "Accuracy" (A3) or "Code Blocks" (B2)
-forces FAIL regardless of total score.
+**P0 override:** a single CRITICAL in "Accuracy" (A3), "Code Blocks" (B2),
+or "Filter Effectiveness" (D1) forces FAIL regardless of total score.
+
+Rationale: A3 wrong-claim, B2 broken-code-block, and D1 leaked session
+noise (e.g. `<system-reminder>`, role markers) all break the rendered
+post in ways no amount of other strengths can compensate for.
 
 ---
 
@@ -67,11 +71,17 @@ must be syntactically valid (no need to run, just lex).
 
 ### A5. Information Density (5%)
 
-**Rule**: Stop-word ratio <50%. New concept count ≥10 per 1000 words.
+**Rule**: The body must not be padded with low-substance filler.
 
-- Stop-word ratio 50–60% → MAJOR
-- Stop-word ratio >60% → CRITICAL
-- <10 new concepts per 1000 words → MINOR
+Check qualitatively (do NOT attempt to count stop-words or concepts
+mechanically — judge by reading):
+
+- A paragraph restates the same idea 2+ times in different words → MAJOR
+- A paragraph is mostly throat-clearing ("It is worth noting that...",
+  "As we all know...", "Before we dive in...") → MAJOR
+- A section's H2 promises content but the body delivers <3 sentences
+  of substance → MAJOR
+- A paragraph could be deleted without losing information → MINOR
 
 ---
 
@@ -104,7 +114,9 @@ must be syntactically valid (no need to run, just lex).
 **Rules**:
 
 - Mixed list markers in same list (e.g., `-` and `*` together) → MINOR
-- List of **exactly 5 items** where 4 or 7 would work → MINOR (anti-AI default)
+- A list item that exists only to pad count to a round number (item
+  reads as filler, restates a prior item, or is vaguer than the others)
+  → MINOR
 - Inconsistent indentation in nested list → MINOR
 - List item without blank line before/after → MINOR
 
@@ -161,17 +173,20 @@ must be syntactically valid (no need to run, just lex).
 
 **Rule**: Content must NOT contain session noise.
 
-- Confirmation dialogs present ("Continue?", "yes/no") → CRITICAL
+- Confirmation dialogs present ("Continue?", "yes/no") → CRITICAL (P0 override)
 - Stack traces pasted wholesale (with `at xxx.xxx` middle frames) → MAJOR
 - Tool-call artifacts (`<tool_result>`, `<command-name>`,
-  `<system-reminder>`) → CRITICAL
+  `<system-reminder>`) → CRITICAL (P0 override)
 - Greetings / thank-yous → MAJOR
-- Role markers (`<user>:`, `<assistant>:`) → CRITICAL
+- Role markers (`<user>:`, `<assistant>:`) → CRITICAL (P0 override)
 
 ### D2. Failed-Path Completeness (5%)
 
 **Rule**: If content mentions a problem + solution, the "why solution works"
 rationale must be present (per implement-agent E3).
+
+**Default**: if content contains no problem-solution pair, D2 makes no
+deduction (the rule only applies when a problem is mentioned).
 
 - Problem stated but no diagnosis → MAJOR
 - Code shown without "why this way" rationale → MINOR
@@ -181,11 +196,19 @@ rationale must be present (per implement-agent E3).
 
 **Rule**: Content's H2 sequence must match the declared `template`.
 
+**Fallback**: if `<!-- template: xxx -->` comment is missing from
+implement-agent's output, downscale all D3 issues by one severity level
+(CRITICAL→MAJOR, MAJOR→MINOR) and emit a single MAJOR for the missing
+template declaration. The retry loop cannot reliably fix what
+implement-agent did not produce.
+
 - how-to template missing "Pitfalls" section → MAJOR
 - concept template missing "When to use" → MAJOR
 - postmortem template missing "Prevention" → MAJOR
+- comparison template missing dimension table → MAJOR
+- faq template missing one Q&A pair → MAJOR
 - Sections in wrong order → MINOR
-- Template comment missing entirely → CRITICAL (cannot verify)
+- Template comment missing entirely → CRITICAL (cannot verify, apply fallback)
 
 ---
 
@@ -253,7 +276,10 @@ rationale must be present (per implement-agent E3).
 - Always use the exact output format above — do not improvise
 - Issue descriptions must be specific and actionable (no "consider improving")
 - Fixes must be one-line actionable ("change X to Y", not "review this")
-- Line numbers are 1-based, relative to the body content (excluding frontmatter)
+- Each issue description ≤30 words; if longer, move detail into the Fix field
+- Line numbers are 1-based, counted from the first line of body content
+  (excluding frontmatter and the opening `---` fence). If a code block
+  spans multiple lines, cite the line where the offending fragment starts.
 - If no issues found, output:
 
   ```
@@ -264,3 +290,5 @@ rationale must be present (per implement-agent E3).
 - Do not quote code block content twice — quote only the offending fragment
 - Maximum 10 issues listed; if more, list top 10 by severity and add
   `+<N> more issues suppressed` line
+- "+N points" impact estimates in TOP 3 FIXES are approximate ranges
+  (e.g. "+5 to +10 points"); do not claim precise numbers
