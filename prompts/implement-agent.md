@@ -3,16 +3,22 @@
 ## Task
 Extract technical content from a Claude Code session and generate a Markdown
 blog post body conforming to fuwari-framework specification. Apply the
-6-rule Extraction Contract below — do not just copy-paste session fragments.
+6-rule Extraction Contract below with one governing principle: **preserve
+the session's concrete evidence before polishing the narrative**. Do not
+just copy-paste session fragments, but also do not summarize away the
+commands, errors, paths, config keys, decisions, and failed attempts that
+made the session useful.
 
 ## Input
 - **topic**: <topic>
 - **session_context**: <session_context>
 - **existing_file_outline**: <outline if merge mode, else "NEW">
+- **evidence_ledger**: <5-12 concrete facts extracted by the main session,
+  optional but binding when present>
 
 ## Extraction Contract (6 Rules)
 
-### Rule E1 — Signal Threshold (mandatory filter)
+### Rule E1 — Evidence-First Extraction (mandatory preservation)
 For every "information unit" (a paragraph / a code block / a decision),
 ask three qualitative questions:
 
@@ -20,15 +26,32 @@ ask three qualitative questions:
 |----------|-------------|------------|
 | Is it on-topic? | Directly about `topic` keywords | Tangential or unrelated |
 | Does it introduce new technical substance? | New technique, command, concept, or decision | Restates what's already covered |
-| Can a reader understand it without prior context? | Yes — stands alone | No — needs earlier session fragments to make sense |
+| Can it be made understandable with one sentence of setup? | Yes — contains reusable evidence | No — pure chatter or UI bookkeeping |
 
 **Keep** units that score "High" on at least 2 of 3 questions.
 **Discard** units that score "Low" on at least 2 of 3.
 **Borderline** (1 high + 1 low + 1 either) → defer to E2/E3/E5.
 
+**Evidence ledger rule:** if `evidence_ledger` is provided, every ledger
+item must survive in the article as prose, a table row, a code block, or a
+clearly merged statement. You may compress wording, but you may not replace
+specific evidence with generic claims.
+
+Preserve concrete evidence when it is relevant:
+- exact commands and command options
+- error strings, exception names, status codes, and log tags
+- file paths, environment variables, config keys, function/class names
+- timestamps, commit hashes, version numbers, platform constraints
+- user decisions, rejected approaches, and why they changed
+
 **Hard discard (no further analysis):** greetings, confirmations,
-thank-yous, retry notifications, "are you sure" prompts, raw stack traces
-without diagnosis, tool-permission dialogs.
+thank-yous, retry notifications, "are you sure" prompts, tool-permission
+dialogs, and raw stack traces that are unrelated to the diagnosis.
+
+**Failure evidence override:** an error, stack trace, permission message, or
+tool output is NOT noise if it explains the problem, proves a constraint, or
+connects an attempted fix to a result. Keep the shortest useful excerpt and
+explain it.
 
 ---
 
@@ -50,7 +73,7 @@ final corrected view, with the correction explicitly noted.
 ---
 
 ### Rule E3 — Failed-Triad Pattern (keep, do not discard)
-Session "trial-and-error" paths are HIGH-VALUE blog material. Do NOT filter
+Session "trial-and-error" paths are HIGH-VALUE blog material. Do NOT drop
 "failed attempts" — extract them as triads.
 
 **Trigger pattern:** `attempt A → error → diagnosis → attempt B → success`
@@ -116,8 +139,9 @@ async def create(user: UserIn):
 artifact's language (`bash` for shell commands, `python` for Python
 code, `yaml` for config, etc.). Do NOT default to `bash` for everything.
 
-**Retention criterion:** Keep only if the failure has a one-sentence
-diagnosis. Pure stack traces without diagnosis → discard.
+**Retention criterion:** Keep if the failure has, or can support, a
+one-sentence diagnosis. If the session only has the trace, keep the error
+class / root-cause line and write the diagnosis from nearby context.
 
 ---
 
@@ -154,8 +178,10 @@ graphql protobuf
 ---
 
 ### Rule E5 — Narrative Reassembly (mandatory template selection)
-Do NOT output in session-chronological order. After extraction, reassemble
-into ONE of five narrative templates. Pick the template by topic type.
+Do not blindly output in raw session-chronological order. After extraction,
+reassemble into ONE of five narrative templates. For debugging/postmortem
+topics, preserve the investigation path because the order of attempts is
+part of the technical content.
 
 **Template: how-to** (commands, setup, configuration)
 
@@ -249,12 +275,11 @@ Main session will STOP and ask the user. Do not proceed with content generation.
 
 ---
 
-## Noise Blacklist (concrete patterns — auto-discard, score = 1)
+## Noise Blacklist (concrete UI/session patterns — discard unless covered by the Failure Evidence Override)
 
 **Confirmation / permission dialogs:**
 
 - "Do you want to proceed", "Continue?", "Confirm execution?"
-- "Permission denied", "Operation not permitted"
 - "Are you sure", "Type yes to continue"
 - "[y/N]", "[Y/n]", "(y/n)"
 

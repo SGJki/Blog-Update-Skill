@@ -18,9 +18,9 @@ Intelligently merge Claude session content into fuwari-framework blog posts. Use
 blog-update/
 ├── skill.md                  # Skill spec (deployed as SKILL.md)
 ├── prompts/
-│   ├── implement-agent.md      # Content generation (6-rule Extraction Contract)
-│   ├── merge-agent.md          # Multi-granularity merge
-│   └── review-agent.md         # 9-dimension quality review (v3)
+│   ├── implement-agent.md      # Evidence-first content generation (6-rule Extraction Contract)
+│   ├── merge-agent.md          # Multi-granularity, evidence-preserving merge
+│   └── review-agent.md         # 10-dimension quality/evidence review (v4)
 ├── scripts/                   # Deterministic validators (uv run)
 │   ├── validate-post.py            # Body: B1/B2/B3/B4/D1/C2 (stdlib)
 │   ├── validate-codeblocks.py      # Code syntax: C1 (pyyaml)
@@ -39,10 +39,10 @@ Main Session
     │
     ├─ Step 1: Read config.json; verify `uv` installed
     ├─ Step 2: Determine topic/tags/category + mode (new/merge)
-    ├─ Step 3: Collect raw session context
-    ├─ Step 4: Generate body (follow prompts/implement-agent.md)
-    ├─ Step 5: Merge with existing file if present (follow prompts/merge-agent.md)
-    ├─ Step 6: Write to file → review (follow prompts/review-agent.md)
+    ├─ Step 3: Collect session context + Evidence Ledger
+    ├─ Step 4: Choose path: fast path, assisted extraction, merge, or review
+    ├─ Step 5: Draft directly or use implement/merge agents only when needed
+    ├─ Step 6: Write to file → validators → optional review
     ├─ Step 6.5: Body validation via scripts (validate-post.py + validate-codeblocks.py)
     │           └─ FAIL → loop back to Step 4 (shared 3-iteration budget)
     ├─ Step 7: Generate frontmatter + H1, strip implement-agent's trailing HTML
@@ -52,7 +52,7 @@ Main Session
     └─ Step 8: Report completion
 ```
 
-Steps 4–6.5–6 share ONE 3-iteration budget. Step 7.5 has its own internal auto-fix loop (max 3 iterations, does not count against the main budget).
+The default is now the fast path: for a new single-topic article, the main session can draft directly from the Evidence Ledger and skip subagents. Steps 4–6.5–6 share ONE 3-iteration budget. Step 7.5 has its own internal auto-fix loop (max 3 iterations, does not count against the main budget).
 
 ## Merge Algorithm
 
@@ -91,3 +91,4 @@ Location: `~/.claude/skills/blog-update/config.json`
 | V6 | Full English localization |
 | V7 | Main-session-only architecture (no subagents); 6-rule Extraction Contract (E1–E6); review-agent v3 with 9 dimensions across 3 categories |
 | V8 | Scripted validation: Step 6.5 body validators + Step 7.5 frontmatter validator (`uv` + PEP 723). review-agent P0 narrowed to A3-only (structural checks B2/D1 delegated to scripts for deterministic reliability). |
+| V9 | Evidence-first workflow: adds Evidence Ledger, removes default mandatory subagent pipeline, prevents prompt-level over-filtering of errors/paths/config/decisions, and adds review-agent D4 Evidence Retention. |

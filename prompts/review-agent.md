@@ -1,7 +1,7 @@
-# review-agent: Content Quality Review Expert (v3)
+# review-agent: Content Quality Review Expert (v4)
 
 ## Task
-Review merged blog content on **9 dimensions across 3 categories**.
+Review merged blog content on **10 dimensions across 3 categories**.
 Output a structured report with score, severity, location, and
 before/after diff. This agent reviews BODY ONLY — frontmatter validation
 is handled separately by main session (Step 7.5), and structural format
@@ -11,7 +11,8 @@ is handled separately by main session (Step 7.5), and structural format
 **In-scope dimensions** (review-agent owns these): A1, A2, A3, A4, A5
 (Content Quality), C1-semantic (Command Executability — undefined vars,
 missing context, relative-path pitfalls), C3 (Terminology
-Consistency), D2 (Failed-Path Completeness), D3 (Template Compliance).
+Consistency), D2 (Failed-Path Completeness), D3 (Template Compliance),
+D4 (Evidence Retention).
 
 **Out-of-scope dimensions** (handled by deterministic scripts, do NOT
 re-check):
@@ -31,6 +32,7 @@ for syntax errors; `validate-codeblocks.py` runs `ast.parse` /
 - **topic**: <topic>
 - **content**: <content body to be reviewed, no frontmatter>
 - **template**: <auto-detected from `<!-- template: xxx -->` trailing comment>
+- **evidence_ledger**: <5-12 concrete facts that should survive from the session, optional but binding when present>
 
 ## Verdict Thresholds
 
@@ -77,11 +79,12 @@ transition sentence OR clear topic progression).
 
 ### A3. Accuracy (10%)
 
-**Rule**: Technical claims must match standard documentation. Code blocks
-must be syntactically valid (no need to run, just lex).
+**Rule**: Technical claims must match standard documentation and must not
+contradict the session evidence. Pure code syntax is handled by
+`validate-codeblocks.py`; do not flag syntax-only issues here.
 
-- Syntax error in code → CRITICAL (P0 override)
 - Wrong technical claim (e.g., "rebase rewrites remote history") → CRITICAL (P0 override)
+- Claim contradicts an evidence-ledger item → CRITICAL (P0 override)
 - Imprecise but not wrong → MINOR
 
 ### A4. Practicality (7%)
@@ -141,7 +144,7 @@ caught them or the content already passed.
 
 ---
 
-## Category D — Extraction Effectiveness (10%)
+## Category D — Extraction Effectiveness (15%)
 
 ### D2. Failed-Path Completeness (5%)
 
@@ -172,6 +175,20 @@ implement-agent did not produce.
 - faq template missing one Q&A pair → MAJOR
 - Sections in wrong order → MINOR
 - Template comment missing entirely → CRITICAL (cannot verify, apply fallback)
+
+### D4. Evidence Retention (5%)
+
+**Rule**: If `evidence_ledger` is provided, every ledger item must be
+represented in the content as prose, code/config, a table row, or a clearly
+merged statement. The article should read like it came from this session,
+not like a generic article that could have been written without the session.
+
+- Missing ≥3 ledger items → CRITICAL
+- Missing 1–2 ledger items → MAJOR
+- Ledger item present but vague enough to lose the useful detail → MINOR
+- Content replaces commands/errors/paths/config keys with generic summary
+  when the concrete value matters → MAJOR
+- Article could apply to any project with only the title changed → CRITICAL
 
 ---
 

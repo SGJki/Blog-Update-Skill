@@ -44,26 +44,59 @@ Read `~/.claude/skills/blog-update/config.json` to get `blogBasePath` and `fileE
 3. Present inferred values to the user for confirmation or adjustment
 4. After confirmation, check if the corresponding file exists → merge or create mode
 
-### Step 3: Extract Session Context
-- **Topic was provided**: Extract content from the session related to the given topic (technical discussion, code, configuration, etc.)
+### Step 3: Extract Session Context + Evidence Ledger
+- **Topic was provided**: Extract content from the session related to the given topic (technical discussion, code, configuration, errors, decisions, rejected approaches, paths, logs, timestamps, etc.)
 - **Topic was auto-inferred**: Session context was already scanned in Step 2 — use the extracted content directly
 
-### Step 4: Launch implement-agent (background)
-Pass topic and session_context. Generates raw markdown content from session.
+Before drafting, create a short **Evidence Ledger** in the main session. This
+ledger is the anti-empty-blog guardrail: 5–12 concrete facts that must survive
+into the post.
 
-### Step 5: Launch merge-agent (background)
-Pass new content from implement-agent and existing file path (if it exists). Performs multi-granularity smart merge.
+Good ledger items look like:
 
-### Step 6: Write merged content to file IMMEDIATELY, then launch review-agent (background)
+- `pi_sandbox.enabled` defaults to true, but ECS degraded because user namespaces / setuid bubblewrap were unavailable.
+- `/home/worker/Web/SGJki-s-blog/src/content/posts` had to be mounted writable so blog-actor could write posts.
+- `Permission denied` / `Operation not permitted` was a meaningful failure signal, not session noise.
+- The final fix auto-added `BLOG_POSTS` to `pi_sandbox.rw_paths` when the directory exists.
+
+The final post must preserve every ledger item as prose, code/config, table
+row, or a clearly merged statement. Do not turn the ledger into a visible
+checklist unless that is the best article format.
+
+### Step 4: Choose Execution Path
+
+Default to the simplest path that can preserve the evidence ledger:
+
+| Path | Use when | Actions |
+|------|----------|---------|
+| **Fast path (default)** | New article, one clear topic, no existing file, evidence ledger is coherent | Main session drafts the body directly using `prompts/implement-agent.md` as rules. No subagents required. |
+| **Assisted extraction** | Session is long/noisy, multiple debugging branches, or the main session cannot confidently cover the ledger | Launch implement-agent with `topic`, `session_context`, `existing_file_outline`, and `evidence_ledger`. |
+| **Merge path** | Target file already exists | Generate new body, then launch merge-agent with existing file and evidence ledger. |
+| **Review path** | Semantic risk is high, article is long, merge was complex, or validators pass but the article still feels generic | Launch review-agent with content, template, and evidence ledger. |
+
+Subagents are tools, not mandatory ceremony. If the fast path can produce a
+specific, technical article and validators pass, skip implement/merge/review.
+
+### Step 5: Draft or Merge Body
+
+- Fast path: main session writes the body directly.
+- Assisted extraction: implement-agent generates the body.
+- Merge path: merge-agent merges new body into the existing article.
+
+All paths must honor the Evidence Ledger. If a validator/review later reports
+generic or missing content, repair by re-inserting the missing concrete facts,
+not by adding filler.
+
+### Step 6: Write body to file IMMEDIATELY, validate, then optionally review
 
 **Critical ordering:** Write merged content to file BEFORE launching review-agent. review-agent reads the file to verify content — if Write happens after launch, review-agent reads the OLD file.
 
 ```
-merge-agent output → Write to file → validate-post.py (Step 6.5) → launch review-agent → reads NEW file ✓
+draft/merge output → Write to file → validate-post.py (Step 6.5) → optional review-agent → reads NEW file ✓
 ```
 
-- review-agent PASS + validate-post exit 0 → Proceed to Step 7
-- Either FAIL → Feed issues back to implement-agent for revision. **Step 4 ↔ 6.5 ↔ 6 share ONE 3-iteration budget** — a script-fail retry at Step 6.5 and a review-fail retry at Step 6 both decrement the same counter. After 3 total iterations across all three steps, hand off to user.
+- validators pass + optional review-agent PASS/skipped → Proceed to Step 7
+- Either FAIL → revise the body using the failing report and the Evidence Ledger. **Steps 4–6.5 share ONE 3-iteration budget** — a script-fail retry and a review-fail retry both decrement the same counter. After 3 total iterations, hand off to user.
 
 ### Step 6.5: Body Validation Pass (scripted via uv)
 
@@ -82,7 +115,7 @@ uv run scripts/validate-codeblocks.py "<absolute-path-to-post>"
 
 **Gate logic:**
 
-- Both exit 0 → proceed to review-agent (Step 6 second half)
+- Both exit 0 → proceed to optional review-agent when Step 4 selected Review path; otherwise continue to Step 7
 - Either exits 1 → SKIP review-agent (don't waste an LLM call on a structurally broken body), loop back to Step 4 / implement-agent with the failing script's report attached. The implement-agent revision prompt should include the failing dimensions and line numbers.
 
 **Language identifier whitelist**: see `scripts/validate-post.py:WHITELIST_LANGS` for the canonical ~50-token list (bash, python, javascript, typescript, go, rust, java, kotlin, swift, scala, c, cpp, sql, yaml, json, toml, html, css, markdown, mermaid, text, dockerfile, etc.). `prompts/implement-agent.md` E4 also enumerates the same set; the script is the single source of truth.
@@ -223,15 +256,17 @@ uv run scripts/validate-frontmatter.py <post-file>
 ```
 
 ### Step 8: Report Completion
-Confirm to the user: file path, operation type (create/merge), and merge statistics.
+Confirm to the user: file path, operation type (create/merge), validators run,
+and a brief Evidence Ledger coverage note. For merge mode, include merge
+statistics.
 
 ## Subagent Reference
 
 | Agent | Mode | Prompt File | Responsibility |
 |-------|------|-------------|----------------|
-| implement-agent | Background | prompts/implement-agent.md | Generate raw markdown from session context |
-| merge-agent | Background | prompts/merge-agent.md | Multi-granularity merge of new + existing content |
-| review-agent | Background | prompts/review-agent.md | Quality gate — semantic review only (A1–A5, C1-semantic, C3, D2, D3) |
+| implement-agent | Optional background | prompts/implement-agent.md | Generate raw markdown from long/noisy session context while preserving evidence |
+| merge-agent | Optional background | prompts/merge-agent.md | Multi-granularity merge of new + existing content without losing evidence |
+| review-agent | Optional background | prompts/review-agent.md | Quality gate — semantic/evidence review only (A1–A5, C1-semantic, C3, D2, D3, D4) |
 
 Frontmatter generation is done by the main session (Step 7) — no subagent needed for a 6-field YAML template.
 
