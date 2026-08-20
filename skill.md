@@ -1,328 +1,188 @@
 ---
 name: blog-update
-description: Use when user invokes /blog-update to publish session content as a fuwari-framework blog post, or asks to save technical discussion as a blog article
+description: Use when the user invokes /blog-update or asks to turn the current technical discussion into a Fuwari blog post.
 ---
 
-# Blog Update (Smart Merge)
+# Blog Update V10
 
-Intelligently merge technical discussion from the session into a fuwari-framework blog post, without requiring the user to manually choose append/update/preserve.
+Turn technical session material into a Fuwari blog article with a minimal, safety-first workflow. The default path is one main editor producing one complete draft, then deterministic checks, then an explicit user-confirmed write for existing posts.
 
 ## When to Use
 
-- User invokes `/blog-update <topic>` — merges session content matching the topic into a blog post
-- User invokes `/blog-update` without topic — auto-infers topic, tags, category from session content
-- User asks to save session content as a blog post
+- User invokes `/blog-update` or `/blog-update <topic>`.
+- User asks to save, publish, merge, or convert the current technical discussion into a blog post.
 
-## When NOT to Use
+## Boundaries
 
-- Session has no meaningful technical content (only greetings, short Q&A, no code/discussion)
-- User explicitly declines the auto-inferred topic
+- Use only the visible conversation, files the user provides, and files in the configured blog/project paths. Do not claim access to all historical sessions unless the user explicitly provides those files or asks to inspect local session rollout files.
+- Do not automatically commit, push, deploy, or publish.
+- Do not write to the user's blog content until the target and operation are clear.
+- Existing articles are changed only after showing a unified diff and receiving explicit user confirmation.
+- New articles are first written as staging drafts with `draft: true`.
 
-## Coordination Flow
+## Configuration
 
-### Step 1: Check Configuration
-Read `~/.claude/skills/blog-update/config.json` to get `blogBasePath` and `fileExtension`. Use defaults if missing.
+Read the deployed skill config when available:
 
-**Also verify `uv` is installed** (`command -v uv`). Steps 6.5 and 7.5 use `uv run` to invoke the Python validators with PEP 723 auto-install. If `uv` is missing, the fallback (LLM runs the checks manually) is exactly the failure mode these scripts were created to eliminate — review-agent v3's P0 narrowing (A3-only) assumes `validate-post.py` pre-gates B2/D1, which the fallback does not guarantee.
-
-- **STOP and ask the user to install uv** (`curl -LsSf https://astral.sh/uv/install.sh | sh` on Linux/macOS, `winget install astral-sh.uv` on Windows). Do not proceed silently with the degraded fallback.
-- Only continue with the manual fallback if the user explicitly accepts the reduced reliability.
-
-### Step 2: Determine topic, tags, category, and mode
-
-**Topic provided (`/blog-update <topic>`):**
-- Check if file exists at `blogBasePath/<topic-slug>.md`
-- File exists → merge mode: auto-extract tags/category from existing frontmatter
-- File not exists → new file mode: ask user for `--tags [..] --category <..>` (or use `--tags`/`--category` from command if provided)
-
-**Topic not provided (`/blog-update` without arguments):**
-1. Scan the entire session for technical discussion, code, configuration, error solving, etc.
-2. Identify the dominant theme and infer:
-   - **topic**: a concise title (e.g. "Git Rebase 工作流")
-   - **tags**: 2–5 relevant tags (e.g. `["Git", "DevOps"]`)
-   - **category**: one category (e.g. `DevOps`)
-3. Present inferred values to the user for confirmation or adjustment
-4. After confirmation, check if the corresponding file exists → merge or create mode
-
-### Step 3: Extract Session Context + Evidence Ledger
-- **Topic was provided**: Extract content from the session related to the given topic (technical discussion, code, configuration, errors, decisions, rejected approaches, paths, logs, timestamps, etc.)
-- **Topic was auto-inferred**: Session context was already scanned in Step 2 — use the extracted content directly
-
-Before drafting, create a short **Evidence Ledger** in the main session. This
-ledger is the anti-empty-blog guardrail: 5–12 concrete facts that must survive
-into the post.
-
-Good ledger items look like:
-
-- `pi_sandbox.enabled` defaults to true, but ECS degraded because user namespaces / setuid bubblewrap were unavailable.
-- `/home/worker/Web/SGJki-s-blog/src/content/posts` had to be mounted writable so blog-actor could write posts.
-- `Permission denied` / `Operation not permitted` was a meaningful failure signal, not session noise.
-- The final fix auto-added `BLOG_POSTS` to `pi_sandbox.rw_paths` when the directory exists.
-
-The final post must preserve every ledger item as prose, code/config, table
-row, or a clearly merged statement. Do not turn the ledger into a visible
-checklist unless that is the best article format.
-
-### Step 4: Choose Execution Path
-
-Default to the simplest path that can preserve the evidence ledger:
-
-| Path | Use when | Actions |
-|------|----------|---------|
-| **Fast path (default)** | New article, one clear topic, no existing file, evidence ledger is coherent | Main session drafts the body directly using `prompts/implement-agent.md` as rules. No subagents required. |
-| **Assisted extraction** | Session is long/noisy, multiple debugging branches, or the main session cannot confidently cover the ledger | Launch implement-agent with `topic`, `session_context`, `existing_file_outline`, and `evidence_ledger`. |
-| **Merge path** | Target file already exists | Generate new body, then launch merge-agent with existing file and evidence ledger. |
-| **Review path** | Semantic risk is high, article is long, merge was complex, or validators pass but the article still feels generic | Launch review-agent with content, template, and evidence ledger. |
-
-Subagents are tools, not mandatory ceremony. If the fast path can produce a
-specific, technical article and validators pass, skip implement/merge/review.
-
-### Step 5: Draft or Merge Body
-
-- Fast path: main session writes the body directly.
-- Assisted extraction: implement-agent generates the body.
-- Merge path: merge-agent merges new body into the existing article.
-
-All paths must honor the Evidence Ledger. If a validator/review later reports
-generic or missing content, repair by re-inserting the missing concrete facts,
-not by adding filler.
-
-### Step 6: Write body to file IMMEDIATELY, validate, then optionally review
-
-**Critical ordering:** Write merged content to file BEFORE launching review-agent. review-agent reads the file to verify content — if Write happens after launch, review-agent reads the OLD file.
-
-```
-draft/merge output → Write to file → validate-post.py (Step 6.5) → optional review-agent → reads NEW file ✓
+```json
+{
+  "blogBasePath": "path/to/src/content/posts",
+  "fileExtension": ".md"
+}
 ```
 
-- validators pass + optional review-agent PASS/skipped → Proceed to Step 7
-- Either FAIL → revise the body using the failing report and the Evidence Ledger. **Steps 4–6.5 share ONE 3-iteration budget** — a script-fail retry and a review-fail retry both decrement the same counter. After 3 total iterations, hand off to user.
+If the config is missing, ask for the blog post directory. Use `.md` as the default extension.
 
-### Step 6.5: Body Validation Pass (scripted via uv)
+`uv` is optional. If it is installed, run scripts with `uv run` so PEP 723 dependencies are available. If it is absent, run the stdlib validators with `python3` and report which dependency-backed checks were skipped. Missing `uv` is not a hard stop.
 
-After Step 6 writes the file, invoke TWO body validators in sequence. Together they catch 7 deterministic dimensions that review-agent no longer covers (delegated to scripts for reliability — LLM miscounts fences, hallucinates whitelist membership, misses subtle session-leak patterns, and cannot reliably "mental lex" code for syntax errors).
+## V10 Workflow
 
-**Invocation** (run from the skill's base directory):
+### 1. Resolve Intent
 
-```bash
-uv run scripts/validate-post.py "<absolute-path-to-post>"
-uv run scripts/validate-codeblocks.py "<absolute-path-to-post>"
-```
+Determine:
 
-- `validate-post.py` (pure stdlib, instant `uv run`): **B1** heading structure, **B2** code blocks format (empty/non-whitelist lang, unclosed fence, box-drawing outside `text`), **B3** list markers (mixed `-`/`*`/`+`), **B4** paragraph separation (leading spaces, trailing-whitespace ratio), **D1** filter effectiveness (tool artifacts, role markers, confirmation dialogs, stack-trace middle frames, greetings), **C2** link integrity (bare URLs, image without alt, broken internal `.md` links)
-- `validate-codeblocks.py` (depends on `pyyaml>=6.0`, auto-installed via PEP 723): **C1-syntax** — runs actual parsers on every code block (`ast.parse` for python, `json.loads` for json, `yaml.safe_load` for yaml, `bash -n` for bash/sh/shell/zsh). Non-parsable languages (JS/TS/Go/Rust/etc.) are skipped silently. Template-placeholder blocks (`<your-name>`, `YOUR_API_KEY`, standalone `...`) are exempted to avoid false positives on illustrative pseudo-code.
-- Both scripts: exit `0` = no CRITICAL/MAJOR (MINOR allowed), `1` = CRITICAL or MAJOR, `2` = ERROR. Line numbers are file-relative (count frontmatter lines).
+- topic/title
+- target slug and file path
+- create vs update mode
+- tags and category
+- whether the user expects a draft, a merge, or only a preview
 
-**Gate logic:**
+For `/blog-update` without a topic, infer a topic from the visible session and ask the user to confirm before writing.
 
-- Both exit 0 → proceed to optional review-agent when Step 4 selected Review path; otherwise continue to Step 7
-- Either exits 1 → SKIP review-agent (don't waste an LLM call on a structurally broken body), loop back to Step 4 / implement-agent with the failing script's report attached. The implement-agent revision prompt should include the failing dimensions and line numbers.
+### 2. Build a Source Brief
 
-**Language identifier whitelist**: see `scripts/validate-post.py:WHITELIST_LANGS` for the canonical ~50-token list (bash, python, javascript, typescript, go, rust, java, kotlin, swift, scala, c, cpp, sql, yaml, json, toml, html, css, markdown, mermaid, text, dockerfile, etc.). `prompts/implement-agent.md` E4 also enumerates the same set; the script is the single source of truth.
+Before drafting, make an internal source brief from the available material. Keep it concise and concrete:
 
-**Why scripted, not LLM:** the B/D1/C2 dimensions are pure structural / regex checks. They are 100% deterministic. Delegating them to review-agent (LLM) historically caused two failure modes: (a) LLM hallucinating that an identifier is in the whitelist when it isn't, (b) LLM missing `<system-reminder>` tags because they look like normal XML. Both classes are eliminated by the script.
+- working title and audience
+- 5-12 facts that must survive into the article
+- commands, errors, paths, configs, decisions, and tradeoffs worth preserving
+- claims that need soft wording because evidence is incomplete
+- material to exclude or anonymize
+- links/images that should remain, with local existence checked when possible
 
-**Fallback (if uv is not installed):** the main session runs the 6 validate-post.py dimensions manually by reading the file and applying the table below. C1-syntax (validate-codeblocks.py) cannot be done manually without language parsers — skip it and warn the user that code-syntax errors may go undetected.
+This replaces the V9 Evidence Ledger ceremony. It is an internal drafting aid, not a visible checklist unless that is the best article format.
 
-| Dim | Check | Severity |
-|-----|-------|----------|
-| B1 | H1 in body, H2 directly followed by H2, level jump >1, empty heading | CRITICAL / CRITICAL / MAJOR / CRITICAL |
-| B2 | empty lang id, non-whitelist lang, unclosed fence, box-drawing outside `text` block | CRITICAL / CRITICAL / CRITICAL / MAJOR |
-| B3 | mixed list markers in same indent group | MINOR |
-| B4 | 2+ leading spaces (non-list/heading), trailing whitespace on >20% of lines | MINOR |
-| D1 | `<system-reminder>`/`<tool_result>`/`<command-name>`/`<task-notification>` tags, `<user>:`/`<assistant>:` role markers, `[y/N]` confirmation, stack-trace `at xxx(` middle frames, lone greetings, retry notifications | CRITICAL / CRITICAL / CRITICAL / MAJOR / MAJOR / MAJOR |
-| C2 | bare URL (not in `<>` or `[text]()`), image `![]()` without alt, broken `](./relative.md)` link, malformed URL | MINOR / MINOR / MAJOR / MAJOR |
+### 3. Draft the Complete Article
 
-### Step 7: Generate frontmatter and write final content
-Main session generates frontmatter inline using the template below, generates the H1 heading (since implement-agent must NOT output H1), and prepends both to the file (Edit or Write). No subagent needed — frontmatter and H1 are deterministic.
+The main editor writes one complete Markdown draft:
 
-**Order of operations:**
-
-1. Take `topic` as-is → use for `title` field AND as the H1 heading text
-2. Generate the 6-field frontmatter (see template below)
-3. Generate H1: `# <topic as-is>` (must match `title` character-for-character)
-4. Strip implement-agent's trailing HTML comments from body before concatenation: `<!-- template: xxx -->` and `<!-- signal-stats: ... -->`. They were consumed by review-agent at Step 6 (template detection); leaving them in leaks metadata into RSS/JSON feeds. Use `sed -i -e '/^<!-- template:/d' -e '/^<!-- signal-stats:/d'` on the post file, or write the body without those trailing lines.
-5. Concatenate: `frontmatter + "\n\n" + H1 + "\n\n" + body` → write to file
-
-**Critical:** the H1 text MUST be character-identical to `title`. The Step 7.5
-Check #8 verifies this. If they differ, the skill will hard-stop and ask the
-user to reconcile.
-
-**fuwari frontmatter template (field names must match exactly):**
 ```yaml
 ---
-title: <topic as-is>
+title: "<topic>"
 published: <YYYY-MM-DD>
-description: "<1-2 sentence summary of the content>"
+description: "<30-150 char summary>"
 tags: ["<tag1>", "<tag2>"]
 category: <category>
-draft: false
+draft: true
 ---
+
+# <topic>
+
+<body>
 ```
 
-**Common field name mistakes to avoid:**
-- `date:` → use `published:`
-- `categories:` (plural) → use `category:` (singular)
-- `published: true/false` → use `draft: false`
-- `tags: [Git, Tools]` (unquoted) → use `tags: ["Git", "Tools"]` (quoted strings)
-- Generating H1 from body's first sentence instead of from `topic` → use `topic` exactly
+Rules:
 
-### Step 7.5: Frontmatter Validation Pass (scripted via uv)
+- `title` and the first H1 must match exactly.
+- New article drafts default to `draft: true`.
+- Do not include raw session role markers, tool transcripts, approval prompts, private tokens, cookies, internal URLs, or absolute user paths unless the user explicitly asks and the material has been sanitized.
+- Preserve useful technical specificity. Do not replace concrete failures, commands, or decisions with generic prose.
+- Use fenced code blocks with explicit language identifiers. Use `text` for logs and ASCII diagrams.
 
-After Step 7 generates frontmatter and writes the file, the main session invokes a Python script that performs all 10 checks programmatically. This catches schema errors that review-agent cannot see — review runs in Step 6, before frontmatter exists. Frontmatter bugs in real outputs (tag typos like `Authentation`, `draft: False` capitalized, missing `description`, title/H1 mismatch) all escaped review-agent in past versions because review-agent literally could not see the frontmatter.
+### 4. Validate Once the Draft Is Complete
 
-**Why scripted, not LLM-as-parser:** frontmatter is a fixed 6-field YAML schema. Delegating parse-and-check to the LLM (the old behavior) reproduces the same class of bugs the check was meant to catch — LLM miscounts list items, hallucinates edit-distance, and silently accepts malformed YAML. PyYAML parses the file deterministically; the check logic is plain Python.
-
-**Invocation** (run from the skill's base directory):
+Run validators against the complete draft, including frontmatter and H1:
 
 ```bash
-uv run scripts/validate-frontmatter.py "<absolute-path-to-post>"
+python3 scripts/scan-sensitive-content.py <draft-file>
+python3 scripts/validate-post.py <draft-file>
+python3 scripts/validate-frontmatter.py <draft-file>
 ```
 
-`uv run` reads the PEP 723 inline metadata at the top of the script and auto-installs `pyyaml>=6.0` on first run (cached thereafter — instant). No manual pip install, no venv management. The script:
-
-- Reads the post file, parses frontmatter via `yaml.safe_load`
-- Runs all 10 checks below in order
-- Applies auto-fixes (up to 3 iterations, see dependency map below)
-- Writes the fixed file in-place (only if any auto-fix was applied)
-- Prints a PASS or FAIL report to stdout
-- Exit codes: `0` = PASS, `1` = FAIL (skill must pause), `2` = ERROR (file missing / unparseable YAML)
-
-**Fallback (if uv is not installed):** the main session runs the 10 checks manually by reading the file and applying the table below. Warn the user that this fallback is less reliable (LLM-as-parser is the failure mode this step was created to eliminate). Recommend installing uv.
-
-**Checks** (run in order, top to bottom):
-
-| # | Check | Rule | Auto-fix? |
-|---|-------|------|-----------|
-| 1 | Required fields present | `title`, `published`, `tags`, `category`, `draft` all exist (description handled by #9) | No — STOP and ask user |
-| 2 | `published` format | Strict `YYYY-MM-DD` (e.g., `2026-04-07`) | Yes — replace with today's date |
-| 3 | `draft` value | Lowercase `false` (PyYAML parses `false`/`False`/`no` all as Python `False`; serializer always writes lowercase) | Yes — rewrite to `false` |
-| 4 | `tags` format | 2–5 entries, all strings (serializer always emits double-quoted form `["A", "B"]`) | Yes — coerce non-strings to strings |
-| 5 | `tags` count | Between 2 and 5 inclusive | No — STOP if <2 or >5 |
-| 6 | `tags` spelling | Flag tags within Levenshtein edit distance 1–2 of a dictionary word (typo signature). Skip non-ASCII tags (CJK etc.) and tags length ≤3 (short acronyms are inherently noisy). Dictionary: Git, GitHub, GitLab, Python, JavaScript, TypeScript, Go, Rust, Java, Kotlin, Swift, Scala, AI, ML, LLM, Web, DevOps, Auth, Authentication, Authorization, Tools, RPC, DB, Database, HTTP, HTTPS, API, REST, GraphQL, Docker, Kubernetes, Linux, MacOS, Windows, Architecture, Frontend, Backend, Fullstack, JWT, OAuth, SSL, TLS, CSS, HTML, JSON, XML, YAML, TOML, SQL, NoSQL, Redis, MySQL, PostgreSQL, MongoDB, Vue, React, Angular, Svelte, Astro, Hugo, Hexo, Node, Deno, Bun, Vite, Webpack | No — report suspects, ask user to confirm or correct |
-| 7 | `tags` duplication | No duplicate entries (case-insensitive) | Yes — dedupe (preserve first-seen order) |
-| 8 | `title` / H1 consistency | `frontmatter.title` character-identical to first `# H1` in body. Code blocks (` ``` `) are skipped when searching for H1, so a `# comment` inside a fence is not mistaken for the body's H1. | No — STOP, ask user which to keep. Note: this should not trigger if Step 7 is followed correctly; if it triggers, Step 7 was bypassed |
-| 9 | `description` non-empty | 30–150 chars, no leading/trailing whitespace. Missing field, empty string, and <30 chars are all treated identically — auto-generate. | Yes — if missing/empty/short, take first non-heading non-codeblock paragraph from body, truncate to 150 chars at word boundary, append "…" if truncated. If >150 chars, truncate the same way. If leading/trailing whitespace, strip. |
-| 10 | `category` value | Single scalar value, not a list | Yes — unwrap `["X"]` to `X` |
-
-**Execution flow (handled by the script):**
-
-1. Read the file just written in Step 7
-2. Parse YAML frontmatter via PyYAML (fail with parse error if malformed)
-3. Run all 10 checks; collect failures
-4. If any non-auto-fixable check (#1, #5, #6, #8) fails → STOP and report
-5. Apply auto-fixes; re-run all checks; repeat up to 3 iterations
-6. After max iterations or convergence: if still failing on auto-fixable → STOP; otherwise PASS
-7. If any auto-fix was applied, rewrite the file in-place with the canonical 6-field serialized form (preserves any extra fields the user added beyond the canonical 6)
-
-**Auto-fix dependency map** (which checks interact — handled implicitly by the script's re-validation loop):
-
-- Check #3 (draft value) is independent — fixing it cannot break #2, #4, #6
-- Check #4 (tags format) implies Check #5 (tags count) and Check #7 (dedup) — re-validate these after #4
-- Check #2 (published date) is independent
-- Check #10 (category unwrap) is independent
-
-**Auto-fix does NOT count against the max-3 retry loop** in Step 6.
-Auto-fix is deterministic, low-risk, and does not require review-agent
-re-run.
-
-**Frontmatter Validation Report** (printed by the script to stdout):
-
-On success:
-
-```
-Frontmatter Validation: PASS (N auto-fixes applied)
-  - <summary of each auto-fix>
-```
-
-On failure:
-
-```
-Frontmatter Validation: FAIL
-  - Check #<N> failed: <check name>
-    <specific detail>
-  Action required: reconcile manually or adjust topic/tags/category and re-run
-  Skill paused — waiting for user input.
-```
-
-**Testing the script standalone:**
+If `uv` is available, dependency-backed checks may also run:
 
 ```bash
-# Dry-run (report only, no file changes):
-uv run scripts/validate-frontmatter.py <post-file> --dry-run
-
-# Apply fixes in-place:
-uv run scripts/validate-frontmatter.py <post-file>
+uv run scripts/validate-codeblocks.py <draft-file>
+uv run scripts/validate-frontmatter.py <draft-file>
 ```
 
-### Step 8: Report Completion
-Confirm to the user: file path, operation type (create/merge), validators run,
-and a brief Evidence Ledger coverage note. For merge mode, include merge
-statistics.
+Blocking failures must be fixed before the article is offered to the user:
 
-## Subagent Reference
+- malformed or missing frontmatter
+- no H1 or title/H1 mismatch
+- unclosed fenced code block
+- broken internal relative `.md` links
+- raw session/tool artifacts
+- likely secrets, credentials, cookies, private keys, private network addresses, private URLs, email addresses, or absolute user paths
 
-| Agent | Mode | Prompt File | Responsibility |
-|-------|------|-------------|----------------|
-| implement-agent | Optional background | prompts/implement-agent.md | Generate raw markdown from long/noisy session context while preserving evidence |
-| merge-agent | Optional background | prompts/merge-agent.md | Multi-granularity merge of new + existing content without losing evidence |
-| review-agent | Optional background | prompts/review-agent.md | Quality gate — semantic/evidence review only (A1–A5, C1-semantic, C3, D2, D3, D4) |
+Advisory findings should be reported but do not block by themselves:
 
-Frontmatter generation is done by the main session (Step 7) — no subagent needed for a 6-field YAML template.
+- tag count/style preferences
+- heading style preferences beyond parseable structure
+- bare external URLs
+- image alt text quality
+- terminology/spelling suggestions
 
-**All write operations are performed by the main session, never by subagents.**
+### 5. Write or Merge Safely
+
+New article:
+
+1. Write to a staging path under the blog directory when available, or to the target path only if the user requested direct creation.
+2. Keep `draft: true` until the user asks to publish.
+3. Report the path and validation results.
+
+Existing article:
+
+1. Read the current article.
+2. Merge the new draft with the existing content, preserving existing frontmatter unless the user asked to change it.
+3. Generate and show a unified diff.
+4. Wait for explicit user confirmation before applying the diff.
+5. Re-run validators after applying.
+
+### 6. Optional Assistance
+
+Use the prompt files only when they reduce real risk:
+
+| Prompt | Use when |
+|---|---|
+| `prompts/implement-agent.md` | Source material is long/noisy and extraction needs a separate pass. |
+| `prompts/merge-agent.md` | Existing article merge is large or structurally complex. |
+| `prompts/review-agent.md` | Validators pass but semantic accuracy, tone, or evidence coverage is still risky. |
+
+Subagents are optional tools, not the default workflow. All writes remain under the main editor's control.
 
 ## Script Reference
 
-| Script | Step | Purpose | Deps |
-|--------|------|---------|------|
-| `scripts/validate-post.py` | 6.5 | Body validation: B1/B2/B3/B4 (format), D1 (session noise), C2 (links) — gates review-agent | pure stdlib |
-| `scripts/validate-codeblocks.py` | 6.5 | Code block syntax: C1-syntax actual parser checks (python `ast.parse`, json `json.loads`, yaml `yaml.safe_load`, bash `bash -n`) — gates review-agent | `pyyaml>=6.0` |
-| `scripts/validate-frontmatter.py` | 7.5 | Frontmatter validation: 10 checks + 6 auto-fixes on 6-field fuwari schema | `pyyaml>=6.0` |
+| Script | Gate | Purpose | Deps |
+|---|---|---|---|
+| `scripts/scan-sensitive-content.py` | Blocking | Detect likely secrets, credentials, cookies, private network references, emails, and absolute user paths. | stdlib |
+| `scripts/validate-post.py` | Blocking + advisory | Validate complete Markdown draft structure, fences, session leaks, and internal links. | stdlib |
+| `scripts/validate-frontmatter.py` | Blocking + advisory | Validate Fuwari frontmatter and title/H1 consistency. Defaults to report-only; `--fix` is required to write. | `pyyaml>=6.0` |
+| `scripts/validate-codeblocks.py` | Blocking when runnable | Parse supported code blocks with real parsers. | `pyyaml>=6.0`, bash when available |
 
-All three invoked via `uv run` (PEP 723 inline metadata auto-installs deps on first run, cached thereafter — invisible to user).
+## Frontmatter Policy
 
-**Fallback** if `uv` is not installed: main session runs the checks manually per the tables in Step 6.5 / 7.5. Warn user this is less reliable (LLM-as-parser / LLM-as-regex is the failure mode these scripts were created to eliminate).
+- The validator is report-only by default.
+- `--fix` may canonicalize safe fields, but it must not flip `draft: true` to `false`.
+- `published` is valid when it is a real `YYYY-MM-DD` date. It should not be rewritten to today unless `--fix` is explicitly used on an invalid or missing date.
+- Tags/category warnings are advisory unless they make the frontmatter unparseable.
 
-## Non-Obvious Error Handling
+## Red Flags
 
-| Scenario | Response |
-|----------|----------|
-| Write before review skipped | **STOP.** review-agent must read the newly written file — always write before launching review |
-| merge-agent fails | Fallback to implement-agent content as final content |
-| Empty content | Warn user, ask whether to continue |
+Stop and ask the user before proceeding when:
 
-## Quick Reference
+- the target path is unclear or outside the configured blog posts directory
+- the session contains plausible secrets or private operational details that cannot be confidently sanitized
+- updating an existing article would delete substantial existing content
+- the user asks to publish or set `draft: false` without reviewing the resulting article
+- three revision attempts still leave blocking validation failures
 
-| Scenario | Command |
-|----------|---------|
-| Auto-infer from session | `/blog-update` (infers topic, tags, category) |
-| Create new article | `/blog-update <topic> --tags [tag1,tag2] --category <category>` |
-| Update existing article | `/blog-update <topic>` (auto-reads tags/category from frontmatter) |
+## Completion Report
 
-## Red Flags — STOP and Reassess
+Tell the user:
 
-- Session content is clearly unrelated to the provided topic
-- Auto-inferred topic is too vague or session has no clear theme
-- User requests "skip review" or "write directly"
-- File path contains sensitive information
-- Loop exceeds 3 times and still cannot pass review
-- User shows impatience ("hurry up", "don't be too strict")
-
-## Common Mistakes
-
-| Mistake | Correct Approach |
-|---------|------------------|
-| Subagent performs write | Write is always done by main session |
-| Skip review | All content must go through review-agent |
-| Loop forever | Max 3 loops, then hand off to user |
-| Empty content write | Warn user to confirm before creating |
-
-## Rationalization Counter
-
-| Excuse | Reality |
-|--------|---------|
-| "review is too slow, just write it" | Review catches format errors that break fuwari frontmatter rendering — a broken blog post is worse than a slow one |
-| "this is simple, no review needed" | Simple content still needs correct heading structure and code block formatting |
-| "I manually checked it" | Manual check misses frontmatter field name errors (e.g. `date:` vs `published:`, `categories:` vs `category:`) |
-| "looping wastes time" | 3 loops max catches real issues; beyond that, hand off to user is the right call |
+- created/updated file path
+- whether the article is still a draft
+- validators run and any skipped checks
+- whether a diff was applied or is waiting for confirmation
+- any remaining advisory findings

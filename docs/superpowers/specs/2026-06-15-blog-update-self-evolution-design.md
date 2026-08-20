@@ -1,14 +1,18 @@
 # Blog-Update Skill 自进化体系设计
 
 **Date**: 2026-06-15
-**Status**: Design — awaiting user review
+**Status**: Frozen by V10 — historical design only
 **Author**: sgjki + Claude (brainstorming session)
 
 ---
 
 ## 0. TL;DR
 
-给 blog-update skill 接一套基于 hermes 方法论的自进化闭环：trace → reward → 结晶 → probationary → trial 攒 η → 晋升/淘汰 → retrieval 注入 → 改变行为。用纯文件存储、Replay-First 评估、用户在 crystallize 环节批准。目标：让 skill 从自己的历史 invocation 中长出可维护的 validator 规则 / prompt 补丁 / Step 2 推断启发式。
+V10 不实施这里设计的自动自进化闭环。本文保留为历史设计记录，不能作为当前实现依据。
+
+当前路线冻结以下能力：自动 prompt patch 晋升、自动 validator patch 晋升、自动 retrieval 注入改变行为、自动 Git commit。后续改进只能走人工审阅的 fixture-driven proposal：先新增可复现 fixture 或失败样例，再由人审查并显式合入脚本、prompt 或 `skill.md`。
+
+原始设想是给 blog-update skill 接一套基于 hermes 方法论的自进化闭环：trace → reward → 结晶 → probationary → trial 攒 η → 晋升/淘汰 → retrieval 注入 → 改变行为。该设想存在归因不清、自动晋升风险和发布面过大的问题，V10 将其排除在默认能力之外。
 
 ---
 

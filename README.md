@@ -1,76 +1,87 @@
 # Blog Update Skill
 
-Intelligently merge Claude session content into fuwari-framework blog posts. Uses scripted Python validators (invoked via `uv run`) for deterministic structural checks, reserving LLM judgment for semantic review.
+Convert technical agent sessions into Fuwari blog posts. V10 uses a minimal, safety-first workflow: one main editor drafts a complete article, deterministic validators check it, and existing posts are changed only after a user-approved diff.
 
 ## Usage
 
 ```bash
-# Create new article
+# Create or preview a draft article
 /blog-update <topic> --tags [tag1,tag2] --category <category>
 
-# Update existing article (auto-read existing tags/category)
+# Infer the topic from the visible session, then ask for confirmation
+/blog-update
+
+# Merge into an existing article after showing a diff
 /blog-update <topic>
 ```
 
 ## File Structure
 
-```
+```text
 blog-update/
-├── skill.md                  # Skill spec (deployed as SKILL.md)
+├── skill.md                      # Canonical V10 skill spec
+├── SKILL.md                      # Loader-compatible copy in this worktree
 ├── prompts/
-│   ├── implement-agent.md      # Evidence-first content generation (6-rule Extraction Contract)
-│   ├── merge-agent.md          # Multi-granularity, evidence-preserving merge
-│   └── review-agent.md         # 10-dimension quality/evidence review (v4)
-├── scripts/                   # Deterministic validators (uv run)
-│   ├── validate-post.py            # Body: B1/B2/B3/B4/D1/C2 (stdlib)
-│   ├── validate-codeblocks.py      # Code syntax: C1 (pyyaml)
-│   └── validate-frontmatter.py     # Frontmatter: 10 checks + 6 auto-fixes (pyyaml)
-├── config.json                # User configuration (NOT overwritten by deploy)
+│   ├── implement-agent.md        # Optional extraction assist for long/noisy sources
+│   ├── merge-agent.md            # Optional complex merge assist
+│   └── review-agent.md           # Optional semantic/evidence review
+├── scripts/
+│   ├── scan-sensitive-content.py # Blocking safety scan, stdlib
+│   ├── validate-post.py          # Markdown structure/session leak/link checks, stdlib
+│   ├── validate-codeblocks.py    # Optional parser checks for code fences, pyyaml
+│   ├── validate-frontmatter.py   # Report-only by default; --fix writes safe fixes
+│   └── check-prompts.py          # V10 fixture/contract tests
+├── config.json                   # Local deployment config
 ├── LICENSE
 └── README.md
 ```
 
-**Deploy note:** source repo uses lowercase `skill.md`; Claude Code loader expects uppercase `SKILL.md`. Copy as `cp skill.md ~/.claude/skills/blog-update/SKILL.md`. Do NOT overwrite the deployed `config.json` (it contains the user's local `blogBasePath`).
-
 ## Workflow
 
-```
-Main Session
-    │
-    ├─ Step 1: Read config.json; verify `uv` installed
-    ├─ Step 2: Determine topic/tags/category + mode (new/merge)
-    ├─ Step 3: Collect session context + Evidence Ledger
-    ├─ Step 4: Choose path: fast path, assisted extraction, merge, or review
-    ├─ Step 5: Draft directly or use implement/merge agents only when needed
-    ├─ Step 6: Write to file → validators → optional review
-    ├─ Step 6.5: Body validation via scripts (validate-post.py + validate-codeblocks.py)
-    │           └─ FAIL → loop back to Step 4 (shared 3-iteration budget)
-    ├─ Step 7: Generate frontmatter + H1, strip implement-agent's trailing HTML
-    │           comments, write final file
-    ├─ Step 7.5: Frontmatter validation via scripts (validate-frontmatter.py)
-    │           └─ FAIL (non-auto-fixable) → STOP and ask user
-    └─ Step 8: Report completion
+```text
+source material / visible session
+    -> internal source brief
+    -> single complete draft with frontmatter + H1 + body
+    -> sensitive scan + structural validators
+    -> new draft path or existing-article unified diff
+    -> explicit user confirmation before applying existing-article changes
 ```
 
-The default is now the fast path: for a new single-topic article, the main session can draft directly from the Evidence Ledger and skip subagents. Steps 4–6.5–6 share ONE 3-iteration budget. Step 7.5 has its own internal auto-fix loop (max 3 iterations, does not count against the main budget).
+Default behavior changed in V10:
 
-## Merge Algorithm
-
-See [prompts/merge-agent.md](prompts/merge-agent.md) for the full multi-granularity algorithm (title → paragraph → richness comparison).
+- New articles start as `draft: true`.
+- Sensitive Content Scan is a blocking gate before any article is offered as publishable.
+- `uv` is optional. Use it when available for PEP 723 dependencies; otherwise run stdlib checks and report skipped dependency-backed checks.
+- `validate-frontmatter.py` is report-only by default. It writes only with `--fix`.
+- `--fix` must not change `draft: true` to `false`.
+- Subagent prompts are optional assistive tools, not the default path.
 
 ## Validators
 
-| Script | Step | Coverage | Deps |
-|--------|------|----------|------|
-| `scripts/validate-post.py` | 6.5 | B1 heading, B2 code blocks, B3 lists, B4 paragraph, D1 session-noise, C2 links | stdlib |
-| `scripts/validate-codeblocks.py` | 6.5 | C1-syntax: actual parser checks (python `ast.parse`, json `json.loads`, yaml `yaml.safe_load`, bash `bash -n`) | pyyaml>=6.0 |
-| `scripts/validate-frontmatter.py` | 7.5 | 10 frontmatter checks + 6 auto-fixes on 6-field fuwari schema | pyyaml>=6.0 |
+| Script | Gate | Coverage | Deps |
+|---|---|---|---|
+| `scripts/scan-sensitive-content.py` | Blocking | Likely secrets, auth headers, cookies, private keys, emails, private IP/URL/host references, absolute user paths | stdlib |
+| `scripts/validate-post.py` | Blocking + advisory | H1 presence, duplicate H1, fence language/closure, session/tool leaks, internal `.md` links, style advisories | stdlib |
+| `scripts/validate-frontmatter.py` | Blocking + advisory | Required Fuwari fields, valid date, boolean draft, title/H1 consistency, tags/category shape | pyyaml optional; simple fallback parser exists |
+| `scripts/validate-codeblocks.py` | Blocking when runnable | Parser-backed checks for Python, JSON, YAML, Bash-like fences | pyyaml + local bash when available |
 
-All invoked via `uv run` (PEP 723 inline metadata auto-installs deps on first run).
+Recommended local verification:
+
+```bash
+python3 -m py_compile scripts/*.py
+python3 scripts/check-prompts.py
+git diff --check
+```
 
 ## Configuration
 
-Location: `~/.claude/skills/blog-update/config.json`
+Deployed config location:
+
+```text
+~/.claude/skills/blog-update/config.json
+```
+
+Example:
 
 ```json
 {
@@ -79,16 +90,23 @@ Location: `~/.claude/skills/blog-update/config.json`
 }
 ```
 
+Do not overwrite a user's deployed `config.json` during installation; it contains their local blog path.
+
+## Deployment Note
+
+Historically the repo used lowercase `skill.md` while some loaders expected uppercase `SKILL.md`. Keep both contents synchronized when editing this repo. In this worktree, `SKILL.md` may be a regular file instead of the historical symlink; do not change that type unless you explicitly intend to update the compatibility layer.
+
 ## Version History
 
 | Version | Major Changes |
-|---------|--------------|
+|---|---|
 | V1 | Basic blog update |
 | V2 | Subagent architecture separation |
 | V3 | Smart multi-granularity merge |
 | V4 | CSO optimization, prompts split, <200 lines |
 | V5 | Merge algorithm enhancement, Red Flags safety check |
 | V6 | Full English localization |
-| V7 | Main-session-only architecture (no subagents); 6-rule Extraction Contract (E1–E6); review-agent v3 with 9 dimensions across 3 categories |
-| V8 | Scripted validation: Step 6.5 body validators + Step 7.5 frontmatter validator (`uv` + PEP 723). review-agent P0 narrowed to A3-only (structural checks B2/D1 delegated to scripts for deterministic reliability). |
-| V9 | Evidence-first workflow: adds Evidence Ledger, removes default mandatory subagent pipeline, prevents prompt-level over-filtering of errors/paths/config/decisions, and adds review-agent D4 Evidence Retention. |
+| V7 | Main-session-only architecture; 6-rule Extraction Contract; review-agent v3 |
+| V8 | Scripted validation for body/code/frontmatter via `uv run` |
+| V9 | Evidence-first workflow with optional subagents and Evidence Ledger |
+| V10 | Minimal safety-first workflow: complete draft first, default `draft: true`, sensitive-content gate, report-only frontmatter validator, optional `uv`, diff/confirmation for existing posts |
