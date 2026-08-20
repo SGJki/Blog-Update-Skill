@@ -1,9 +1,11 @@
 # implement-agent: Session Content Extraction Expert
 
 ## Task
-Extract technical content from a Claude Code session and generate a Markdown
-blog post body conforming to fuwari-framework specification. Apply the
-6-rule Extraction Contract below with one governing principle: **preserve
+Extract technical content from a technical agent session and generate Markdown
+article material for the V10 main editor. This prompt is optional assistance
+for long/noisy source material; the main editor owns the complete draft,
+frontmatter, H1, validation, and all writes. Apply the 6-rule Extraction
+Contract below with one governing principle: **preserve
 the session's concrete evidence before polishing the narrative**. Do not
 just copy-paste session fragments, but also do not summarize away the
 commands, errors, paths, config keys, decisions, and failed attempts that
@@ -13,8 +15,8 @@ made the session useful.
 - **topic**: <topic>
 - **session_context**: <session_context>
 - **existing_file_outline**: <outline if merge mode, else "NEW">
-- **evidence_ledger**: <5-12 concrete facts extracted by the main session,
-  optional but binding when present>
+- **source_brief** or **evidence_ledger**: <5-12 concrete facts extracted by
+  the main editor, optional but binding when present>
 
 ## Extraction Contract (6 Rules)
 
@@ -32,10 +34,10 @@ ask three qualitative questions:
 **Discard** units that score "Low" on at least 2 of 3.
 **Borderline** (1 high + 1 low + 1 either) → defer to E2/E3/E5.
 
-**Evidence ledger rule:** if `evidence_ledger` is provided, every ledger
-item must survive in the article as prose, a table row, a code block, or a
-clearly merged statement. You may compress wording, but you may not replace
-specific evidence with generic claims.
+**Source brief rule:** if `source_brief` or `evidence_ledger` is provided,
+every listed fact must survive in the article as prose, a table row, a code
+block, or a clearly merged statement. You may compress wording, but you may
+not replace specific evidence with generic claims.
 
 Preserve concrete evidence when it is relevant:
 - exact commands and command options
@@ -156,8 +158,8 @@ Every code block MUST be paired with its rationale. Context window =
 3. `**Why this way:**` — rationale for this specific approach
 4. `**Key params:**` — bullet list of `<param>` — `<meaning>` for each non-obvious parameter
 
-**Language identifier whitelist** (use exactly these tokens — review-agent
-will CRITICAL-flag any identifier not in this list). **Source of truth:
+**Language identifier whitelist** (use exactly these tokens; validators flag
+identifiers not in this list). **Source of truth:
 `scripts/validate-post.py:WHITELIST_LANGS` — keep this list in sync if you
 edit either location.**
 
@@ -238,9 +240,8 @@ N. Further reading / related topics
 <!-- signal-stats: extracted=12, kept=8, dropped=4 -->
 ```
 
-These comments let review-agent verify template compliance.
-Signal-stats are LLM estimates (debug signal only — do not treat as
-precise counts).
+These comments are optional debug metadata for semantic review. The main
+editor may strip them before final output.
 
 ---
 
@@ -253,7 +254,7 @@ co-occurrence + temporal continuity).
 - **1 dominant topic** → proceed normally, no split
 - **2 dominant topics** → default: merge into ONE post, with a top-level
   H2 per topic and a 1-paragraph bridge between them. Output `WARN: 2-topics-merged`
-  as the first body line so review-agent can flag if the bridge is missing.
+  as a draft note so the main editor can decide whether to split or revise.
 - **≥3 independent topics** (each with substantial material, roughly
   ≥500 words of signal-grade content) → do NOT write a merged post.
 
@@ -307,8 +308,9 @@ Main session will STOP and ask the user. Do not proceed with content generation.
 
 ## Output Format
 
-The body is pure markdown. No frontmatter, no H1 (main session generates
-both frontmatter and the H1 in Step 7).
+Output pure Markdown article material unless the main editor explicitly asks
+for a complete draft. By default, do not include frontmatter or H1; V10 main
+editor assembles the complete draft and validates it as one file.
 
 **Body MUST start with an H2 (`##`).** H3+ may follow inside an H2
 section. H1 must NOT appear in body.

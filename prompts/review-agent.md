@@ -1,12 +1,10 @@
-# review-agent: Content Quality Review Expert (v4)
+# review-agent: Optional Semantic Review Expert (V10)
 
 ## Task
-Review merged blog content on **10 dimensions across 3 categories**.
-Output a structured report with score, severity, location, and
-before/after diff. This agent reviews BODY ONLY — frontmatter validation
-is handled separately by main session (Step 7.5), and structural format
-/ session-noise / link-integrity checks are handled by
-`scripts/validate-post.py` (Step 6.5) before this agent runs.
+Review blog content on semantic quality and evidence retention when the V10
+main editor asks for optional review. Output a structured report with score,
+severity, location, and before/after diff. The main editor owns frontmatter,
+H1, deterministic validators, file writes, and user confirmation.
 
 **In-scope dimensions** (review-agent owns these): A1, A2, A3, A4, A5
 (Content Quality), C1-semantic (Command Executability — undefined vars,
@@ -26,13 +24,14 @@ If you observe issues in out-of-scope dimensions, ignore them silently —
 they are caught by deterministic scripts with higher reliability than
 LLM judgment. Specifically, do NOT attempt to "mental lex" code blocks
 for syntax errors; `validate-codeblocks.py` runs `ast.parse` /
-`json.loads` / `yaml.safe_load` / `bash -n` on every parsable block.
+`json.loads` / `yaml.safe_load` / `bash -n` on parsable blocks when the
+optional codeblock validator is run.
 
 ## Input
 - **topic**: <topic>
 - **content**: <content body to be reviewed, no frontmatter>
 - **template**: <auto-detected from `<!-- template: xxx -->` trailing comment>
-- **evidence_ledger**: <5-12 concrete facts that should survive from the session, optional but binding when present>
+- **source_brief** or **evidence_ledger**: <5-12 concrete facts that should survive from the session, optional but binding when present>
 
 ## Verdict Thresholds
 
@@ -52,8 +51,8 @@ regardless of total score.
 
 Rationale: A3 wrong-claim breaks the rendered post in ways no amount of
 other strengths can compensate for. (B2 broken-code-block and D1 leaked
-session noise were P0 in v2 but are now pre-gated by validate-post.py
-before review-agent runs — review-agent never sees content with those
+session noise were P0 in v2 but are now handled by validate-post.py
+before semantic review runs; review-agent should not see content with those
 defects.)
 
 ---
@@ -115,7 +114,7 @@ mechanically — judge by reading):
 
 ### C1. Command Executability — Semantic (10%)
 
-**Rule**: review-agent owns only the *semantic* C1 checks (context-dependent, require reading surrounding prose). Pure syntax errors (unbalanced quotes/brackets, Python `ast.parse` failures, JSON `json.loads` failures, YAML `yaml.safe_load` failures, `bash -n` failures) are pre-gated by `validate-codeblocks.py` — review-agent never sees content with those defects.
+**Rule**: review-agent owns only the *semantic* C1 checks (context-dependent, require reading surrounding prose). Pure syntax errors (unbalanced quotes/brackets, Python `ast.parse` failures, JSON `json.loads` failures, YAML `yaml.safe_load` failures, `bash -n` failures) are handled by `validate-codeblocks.py` when that optional dependency-backed validator is run.
 
 In-scope (semantic) sub-checks:
 
@@ -178,7 +177,7 @@ implement-agent did not produce.
 
 ### D4. Evidence Retention (5%)
 
-**Rule**: If `evidence_ledger` is provided, every ledger item must be
+**Rule**: If `source_brief` or `evidence_ledger` is provided, every listed item must be
 represented in the content as prose, code/config, a table row, or a clearly
 merged statement. The article should read like it came from this session,
 not like a generic article that could have been written without the session.
