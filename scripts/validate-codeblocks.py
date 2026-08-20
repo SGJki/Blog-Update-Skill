@@ -2,9 +2,9 @@
 # requires-python = ">=3.8"
 # dependencies = ["pyyaml>=6.0"]
 # ///
-"""Code block syntax validation for blog-update skill (Step 6.5).
+"""Optional code block syntax validation for blog-update skill V10.
 
-Checks each fenced code block in body for actual syntax errors using
+Checks each fenced code block in a complete draft for actual syntax errors using
 deterministic parsers. This catches errors that review-agent's mental
 lex is unreliable at detecting (unbalanced brackets in long shell
 one-liners, Python indentation errors, JSON trailing commas, YAML
@@ -30,8 +30,9 @@ JSON fragment exemption: a JSON block that does not start with `{` or
 `[` is treated as a fragment (common in docs) and skipped silently.
 
 Usage:
+  python3 scripts/validate-codeblocks.py <post-file>
   uv run scripts/validate-codeblocks.py <post-file>
-  uv run scripts/validate-codeblocks.py <post-file> --json
+  python3 scripts/validate-codeblocks.py <post-file> --json
 
 Exit codes:
   0 = no CRITICAL and no MAJOR (MINOR allowed)

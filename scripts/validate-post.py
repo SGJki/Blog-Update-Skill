@@ -2,11 +2,11 @@
 # requires-python = ">=3.8"
 # dependencies = []
 # ///
-"""Body validation pass for blog-update skill (Step 6.5).
+"""Markdown validation pass for blog-update skill V10.
 
 Checks markdown body for 6 deterministic dimensions (no LLM judgment):
 
-  B1 - Heading structure (H1 in body, H2-jump-H2, level jumps, empty)
+  B1 - Heading structure (missing H1, duplicate H1, level jumps, empty)
   B2 - Code blocks (empty/non-whitelist lang, unclosed fence, box-drawing)
   B3 - List format (mixed markers)
   B4 - Paragraph separation (leading spaces, trailing whitespace ratio)
@@ -14,16 +14,16 @@ Checks markdown body for 6 deterministic dimensions (no LLM judgment):
        confirmation dialogs, stack-trace middle frames, greetings)
   C2 - Link integrity (bare URLs, image without alt, broken internal links)
 
-review-agent no longer covers these dimensions — they are fully delegated
-to this script for reliability (LLM miscounts fences, hallucinates
-whitelist membership, misses subtle session-leak patterns).
+These dimensions are deterministic enough to check in script instead of
+semantic review.
 
 Usage:
+  python3 scripts/validate-post.py <post-file>
   uv run scripts/validate-post.py <post-file>
-  uv run scripts/validate-post.py <post-file> --json
+  python3 scripts/validate-post.py <post-file> --json
 
 Exit codes:
-  0 = no CRITICAL and no MAJOR (MINOR allowed)
+  0 = no CRITICAL and no MAJOR (MINOR/advisory allowed)
   1 = at least one CRITICAL or MAJOR
   2 = ERROR (file missing, etc.)
 """
@@ -60,6 +60,7 @@ def check_b1_headings(lines):
     prev_level = 0
     prev_was_h2 = False
     in_code = False
+    h1_lines = []
     for i, line in enumerate(lines, 1):
         if line.startswith("```"):
             in_code = not in_code
@@ -74,15 +75,19 @@ def check_b1_headings(lines):
         hashes, text = m.group(1), m.group(2)
         level = len(hashes)
         if level == 1:
-            issues.append(("CRITICAL", i, "B1", "H1 in body (main session generates H1 from title)", line))
+            h1_lines.append(i)
         if not text:
             issues.append(("CRITICAL", i, "B1", "Empty heading text", line))
         if prev_level > 0 and level > prev_level + 1:
-            issues.append(("MAJOR", i, "B1", f"Heading level jumps H{prev_level} -> H{level}", line))
+            issues.append(("MINOR", i, "B1", f"Heading level jumps H{prev_level} -> H{level}", line))
         if prev_was_h2 and level == 2:
-            issues.append(("CRITICAL", i, "B1", "H2 directly followed by another H2 (no content/H3 between)", line))
+            issues.append(("MINOR", i, "B1", "H2 directly followed by another H2 (style advisory)", line))
         prev_level = level
         prev_was_h2 = (level == 2)
+    if not h1_lines:
+        issues.append(("CRITICAL", 1, "B1", "Missing H1 in complete draft", ""))
+    elif len(h1_lines) > 1:
+        issues.append(("MAJOR", h1_lines[1], "B1", f"Multiple H1 headings found at lines {h1_lines}", ""))
     return issues
 
 
@@ -231,7 +236,7 @@ def check_c2_links(lines, post_path):
             target = m.group(1)
             target_path = (post_dir / target).resolve()
             if not target_path.exists():
-                issues.append(("MAJOR", i, "C2", f"Internal link target missing: `{target}`", line[:80]))
+                issues.append(("CRITICAL", i, "C2", f"Internal link target missing: `{target}`", line[:80]))
 
         for m in re.finditer(r"\]\((https?://[^\)]+)\)", line):
             url = m.group(1)
@@ -286,9 +291,20 @@ def main():
         print(json.dumps(out, indent=2, ensure_ascii=False))
     else:
         if not issues:
-            print("Body Validation: PASS (no B1/B2/B3/B4/D1/C2 issues)")
+            print("Markdown Validation: PASS (no B1/B2/B3/B4/D1/C2 issues)")
+        elif not critical and not major:
+            print("Markdown Validation: PASS with advisory findings")
+            print(f"  CRITICAL: {critical}  MAJOR: {major}  MINOR: {minor}")
+            print()
+            shown = issues[:args.max_issues]
+            for sev, line_no, dim, msg, snip in shown:
+                print(f"  [{sev}] L{line_no} {dim}: {msg}")
+                if snip:
+                    print(f"    `{snip}`")
+            if len(issues) > args.max_issues:
+                print(f"  ... and {len(issues) - args.max_issues} more issues suppressed")
         else:
-            print("Body Validation: FAIL")
+            print("Markdown Validation: FAIL")
             print(f"  CRITICAL: {critical}  MAJOR: {major}  MINOR: {minor}")
             print()
             shown = issues[:args.max_issues]
