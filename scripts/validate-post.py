@@ -2,11 +2,11 @@
 # requires-python = ">=3.8"
 # dependencies = []
 # ///
-"""Markdown validation pass for blog-update skill V10.
+"""Markdown/MDX validation pass for blog-update skill V11.
 
 Checks markdown body for 6 deterministic dimensions (no LLM judgment):
 
-  B1 - Heading structure (missing H1, duplicate H1, level jumps, empty)
+  B1 - Heading structure (duplicate H1, level jumps, empty)
   B2 - Code blocks (empty/non-whitelist lang, unclosed fence, box-drawing)
   B3 - List format (mixed markers)
   B4 - Paragraph separation (leading spaces, trailing whitespace ratio)
@@ -84,9 +84,10 @@ def check_b1_headings(lines):
             issues.append(("MINOR", i, "B1", "H2 directly followed by another H2 (style advisory)", line))
         prev_level = level
         prev_was_h2 = (level == 2)
-    if not h1_lines:
-        issues.append(("CRITICAL", 1, "B1", "Missing H1 in complete draft", ""))
-    elif len(h1_lines) > 1:
+    # Astro's Article layout renders the page title as the semantic H1. Entry
+    # bodies may therefore omit H1; if an H1 is present, keep the single-H1
+    # invariant and let validate-frontmatter.py compare it with title.
+    if len(h1_lines) > 1:
         issues.append(("MAJOR", h1_lines[1], "B1", f"Multiple H1 headings found at lines {h1_lines}", ""))
     return issues
 
@@ -232,7 +233,7 @@ def check_c2_links(lines, post_path):
             if not alt.strip():
                 issues.append(("MINOR", i, "C2", "Image without alt text", line[:80]))
 
-        for m in re.finditer(r"\]\((\.{1,2}/[^)]+\.md)\)", line):
+        for m in re.finditer(r"\]\((\.{1,2}/[^)]+\.(?:md|mdx))\)", line):
             target = m.group(1)
             target_path = (post_dir / target).resolve()
             if not target_path.exists():
@@ -258,8 +259,8 @@ def run_all_checks(lines, post_path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Validate fuwari blog body (B/D1/C2 dimensions).")
-    parser.add_argument("file", help="Path to .md post file")
+    parser = argparse.ArgumentParser(description="Validate Astro Markdown/MDX body (B/D1/C2 dimensions).")
+    parser.add_argument("file", help="Path to .md or .mdx entry file")
     parser.add_argument("--json", action="store_true", help="Output JSON instead of markdown")
     parser.add_argument("--max-issues", type=int, default=30, help="Max issues to print (default 30)")
     args = parser.parse_args()
@@ -291,9 +292,9 @@ def main():
         print(json.dumps(out, indent=2, ensure_ascii=False))
     else:
         if not issues:
-            print("Markdown Validation: PASS (no B1/B2/B3/B4/D1/C2 issues)")
+            print("Markdown/MDX Validation: PASS (no B1/B2/B3/B4/D1/C2 issues)")
         elif not critical and not major:
-            print("Markdown Validation: PASS with advisory findings")
+            print("Markdown/MDX Validation: PASS with advisory findings")
             print(f"  CRITICAL: {critical}  MAJOR: {major}  MINOR: {minor}")
             print()
             shown = issues[:args.max_issues]
@@ -304,7 +305,7 @@ def main():
             if len(issues) > args.max_issues:
                 print(f"  ... and {len(issues) - args.max_issues} more issues suppressed")
         else:
-            print("Markdown Validation: FAIL")
+            print("Markdown/MDX Validation: FAIL")
             print(f"  CRITICAL: {critical}  MAJOR: {major}  MINOR: {minor}")
             print()
             shown = issues[:args.max_issues]

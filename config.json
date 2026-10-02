@@ -1,4 +1,7 @@
 {
-  "blogBasePath": "E:\\web\\SGJki-s-blog\\src\\content\\posts",
-  "fileExtension": ".md"
+  "projectRoot": ".",
+  "contentDir": "src/content/entries",
+  "fileExtension": ".mdx",
+  "format": "astro-mdx",
+  "packageManager": "npm"
 }

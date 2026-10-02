@@ -1,8 +1,8 @@
-# review-agent: Optional Semantic Review Expert (V10)
+# review-agent: Optional Semantic Review Expert (V11 Astro MDX)
 
 ## Task
-Review blog content on semantic quality and evidence retention when the V10
-main editor asks for optional review. Output a structured report with score,
+Review blog, note, or report content on semantic quality and evidence retention
+when the V11 main editor asks for optional review. Output a structured report with score,
 severity, location, and before/after diff. The main editor owns frontmatter,
 H1, deterministic validators, file writes, and user confirmation.
 
@@ -29,9 +29,14 @@ optional codeblock validator is run.
 
 ## Input
 - **topic**: <topic>
+- **type**: <blog | note | report>
 - **content**: <content body to be reviewed, no frontmatter>
 - **template**: <auto-detected from `<!-- template: xxx -->` trailing comment>
 - **source_brief** or **evidence_ledger**: <5-12 concrete facts that should survive from the session, optional but binding when present>
+
+For `report` entries, review coverage and source attribution. For `note`
+entries, review whether the scope is concise and time-oriented. Do not suggest
+Featured for notes or reports; only public blog entries can be Featured.
 
 ## Verdict Thresholds
 

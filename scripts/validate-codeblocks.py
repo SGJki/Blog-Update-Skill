@@ -2,7 +2,7 @@
 # requires-python = ">=3.8"
 # dependencies = ["pyyaml>=6.0"]
 # ///
-"""Optional code block syntax validation for blog-update skill V10.
+"""Optional code block syntax validation for blog-update skill V11.
 
 Checks each fenced code block in a complete draft for actual syntax errors using
 deterministic parsers. This catches errors that review-agent's mental

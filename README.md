@@ -1,112 +1,133 @@
 # Blog Update Skill
 
-Convert technical agent sessions into Fuwari blog posts. V10 uses a minimal, safety-first workflow: one main editor drafts a complete article, deterministic validators check it, and existing posts are changed only after a user-approved diff.
+Convert technical agent sessions into Astro MDX knowledge-garden entries. V11
+keeps the V10 safety workflow while adding the current `blog | note | report`
+content contract, type-specific routes, and project-level static-output checks.
 
 ## Usage
 
-```bash
-# Create or preview a draft article
-/blog-update <topic> --tags [tag1,tag2] --category <category>
-
-# Infer the topic from the visible session, then ask for confirmation
-/blog-update
-
-# Merge into an existing article after showing a diff
-/blog-update <topic>
-```
-
-## File Structure
-
 ```text
-blog-update/
-├── skill.md                      # Canonical V10 skill spec
-├── SKILL.md                      # Loader-compatible copy in this worktree
-├── prompts/
-│   ├── implement-agent.md        # Optional extraction assist for long/noisy sources
-│   ├── merge-agent.md            # Optional complex merge assist
-│   └── review-agent.md           # Optional semantic/evidence review
-├── scripts/
-│   ├── scan-sensitive-content.py # Blocking safety scan, stdlib
-│   ├── validate-post.py          # Markdown structure/session leak/link checks, stdlib
-│   ├── validate-codeblocks.py    # Optional parser checks for code fences, pyyaml
-│   ├── validate-frontmatter.py   # Report-only by default; --fix writes safe fixes
-│   └── check-prompts.py          # V10 fixture/contract tests
-├── config.json                   # Local deployment config
-├── LICENSE
-└── README.md
+/blog-update <topic> --type blog --tags [tag1,tag2] --category <category>
+/blog-update <topic> --type note
+/blog-update <topic> --type report
 ```
+
+When the type is omitted or ambiguous, propose a candidate and ask before
+writing. New entries are staged with `draft: true`.
 
 ## Workflow
 
 ```text
-source material / visible session
+visible session
     -> internal source brief
-    -> single complete draft with frontmatter + H1 + body
-    -> sensitive scan + structural validators
-    -> new draft path or existing-article unified diff
-    -> explicit user confirmation before applying existing-article changes
+    -> complete MDX entry with Astro frontmatter
+    -> sensitive + structural + frontmatter validators
+    -> npm project checks and public-output checks
+    -> new draft or existing-entry unified diff
+    -> explicit confirmation before applying an existing-entry change
 ```
 
-Default behavior changed in V10:
+The main editor owns all writes. Optional prompt files assist extraction, merge,
+or semantic review; they do not authorize subagent writes.
 
-- New articles start as `draft: true`.
-- Sensitive Content Scan is a blocking gate before any article is offered as publishable.
-- `uv` is optional. Use it when available for PEP 723 dependencies; otherwise run stdlib checks and report skipped dependency-backed checks.
-- `validate-frontmatter.py` is report-only by default. It writes only with `--fix`.
-- `--fix` must not change `draft: true` to `false`.
-- Subagent prompts are optional assistive tools, not the default path.
+## Current project contract
 
-## Validators
+Entries live in `src/content/entries/*.mdx` and use:
 
-| Script | Gate | Coverage | Deps |
-|---|---|---|---|
-| `scripts/scan-sensitive-content.py` | Blocking | Likely secrets, auth headers, cookies, private keys, emails, private IP/URL/host references, absolute user paths | stdlib |
-| `scripts/validate-post.py` | Blocking + advisory | H1 presence, duplicate H1, fence language/closure, session/tool leaks, internal `.md` links, style advisories | stdlib |
-| `scripts/validate-frontmatter.py` | Blocking + advisory | Required Fuwari fields, valid date, boolean draft, title/H1 consistency, tags/category shape | pyyaml optional; simple fallback parser exists |
-| `scripts/validate-codeblocks.py` | Blocking when runnable | Parser-backed checks for Python, JSON, YAML, Bash-like fences | pyyaml + local bash when available |
+```yaml
+title: <title>
+description: <summary>
+type: blog # blog | note | report
+lang: zh-CN # zh-CN | en
+published: 2026-10-02
+draft: true
+category: <category>
+tags: [<tag1>, <tag2>]
+readingTime: 8
+```
 
-Recommended local verification:
+`blog` entries may be Featured. `note` and `report` entries remain in their
+own lists even if an invalid `featured: true` flag is present. Reports may add
+`coverage` and structured `sources`. The public selectors exclude drafts from
+pages, Garden, RSS, and Pagefind.
 
-```bash
-python3 -m py_compile scripts/*.py
-python3 scripts/check-prompts.py
-git diff --check
+## File structure
+
+```text
+blog-update/
+├── SKILL.md / skill.md       # synchronized loader entrypoints
+├── config.json               # relative Astro project configuration
+├── prompts/
+│   ├── implement-agent.md    # optional evidence extraction
+│   ├── merge-agent.md        # optional existing-entry merge
+│   └── review-agent.md       # optional semantic/evidence review
+└── scripts/
+    ├── scan-sensitive-content.py
+    ├── validate-post.py
+    ├── validate-frontmatter.py
+    ├── validate-codeblocks.py
+    └── check-prompts.py
 ```
 
 ## Configuration
 
-Deployed config location:
-
-```text
-~/.claude/skills/blog-update/config.json
-```
-
-Example:
-
 ```json
 {
-  "blogBasePath": "your/blog/posts/path",
-  "fileExtension": ".md"
+  "projectRoot": ".",
+  "contentDir": "src/content/entries",
+  "fileExtension": ".mdx",
+  "format": "astro-mdx",
+  "packageManager": "npm"
 }
 ```
 
-Do not overwrite a user's deployed `config.json` during installation; it contains their local blog path.
+The skill resolves `projectRoot` from the current working directory and checks
+for `package.json`, `src/content/config.ts`, and the content directory. A legacy
+`blogBasePath` pointing to an old posts directory must be reported before use.
 
-## Deployment Note
+## Validators
 
-Historically the repo used lowercase `skill.md` while some loaders expected uppercase `SKILL.md`. Keep both contents synchronized when editing this repo. In this worktree, `SKILL.md` may be a regular file instead of the historical symlink; do not change that type unless you explicitly intend to update the compatibility layer.
+| Script | Gate | Coverage |
+|---|---|---|
+| `scan-sensitive-content.py` | Blocking | Secrets, credentials, private URLs/hosts, emails, absolute user paths |
+| `validate-post.py` | Blocking + advisory | Markdown/MDX headings, fenced blocks, session leaks, relative `.md`/`.mdx` links |
+| `validate-frontmatter.py` | Blocking + advisory | Astro fields, `type`, `lang`, dates, report sources, title/H1 agreement |
+| `validate-codeblocks.py` | Blocking when runnable | Python, JSON, YAML, and shell syntax |
 
-## Version History
+After skill validators, run from the project root:
 
-| Version | Major Changes |
+```bash
+npm run check
+npm run test
+npm run build
+npm run verify:html
+npm run verify:public
+```
+
+Run `npm run test:e2e` for browser-behavior changes. `uv` is optional; use
+`python3` when it is unavailable and report skipped dependency-backed checks.
+
+## Safety invariants
+
+- New content stays `draft: true`.
+- Existing entries require a displayed diff and explicit confirmation.
+- Canonical basenames and body evidence are preserved.
+- No automatic commit, push, deploy, or publish.
+- Redirects and bulk migration are separate tasks.
+- `SKILL.md` and `skill.md` must remain byte-for-byte synchronized.
+
+## Verification
+
+```bash
+PYTHONPYCACHEPREFIX=/tmp/blog-update-skill-pycache python3 -m py_compile scripts/*.py
+python3 scripts/check-prompts.py
+```
+
+The skill-creator quick validator should also be run when available.
+
+## Version history
+
+| Version | Major changes |
 |---|---|
-| V1 | Basic blog update |
-| V2 | Subagent architecture separation |
-| V3 | Smart multi-granularity merge |
-| V4 | CSO optimization, prompts split, <200 lines |
-| V5 | Merge algorithm enhancement, Red Flags safety check |
-| V6 | Full English localization |
-| V7 | Main-session-only architecture; 6-rule Extraction Contract; review-agent v3 |
-| V8 | Scripted validation for body/code/frontmatter via `uv run` |
-| V9 | Evidence-first workflow with optional subagents and Evidence Ledger |
-| V10 | Minimal safety-first workflow: complete draft first, default `draft: true`, sensitive-content gate, report-only frontmatter validator, optional `uv`, diff/confirmation for existing posts |
+| V10 | Minimal safety-first workflow, draft-by-default, sensitive-content gate |
+| V11 | Astro MDX entries, `blog`/`note`/`report` contract, project checks, public-output validation |
