@@ -1,8 +1,8 @@
 # implement-agent: Session Content Extraction Expert
 
 ## Task
-Extract technical content from a technical agent session and generate Markdown
-article material for the V10 main editor. This prompt is optional assistance
+Extract technical content from a technical agent session and generate Astro MDX
+entry material for the V11 main editor. This prompt is optional assistance
 for long/noisy source material; the main editor owns the complete draft,
 frontmatter, H1, validation, and all writes. Apply the 6-rule Extraction
 Contract below with one governing principle: **preserve
@@ -13,10 +13,17 @@ made the session useful.
 
 ## Input
 - **topic**: <topic>
+- **type**: <blog | note | report; candidate if omitted>
+- **lang**: <zh-CN | en>
 - **session_context**: <session_context>
 - **existing_file_outline**: <outline if merge mode, else "NEW">
 - **source_brief** or **evidence_ledger**: <5-12 concrete facts extracted by
   the main editor, optional but binding when present>
+
+When `type` is `report`, preserve dates, coverage, and source titles/URLs. When
+it is `note`, favor a compact chronological observation. Never add
+`featured: true` to a note or report. The main editor supplies the final
+frontmatter and asks the user when the type is ambiguous.
 
 ## Extraction Contract (6 Rules)
 
@@ -308,8 +315,8 @@ Main session will STOP and ask the user. Do not proceed with content generation.
 
 ## Output Format
 
-Output pure Markdown article material unless the main editor explicitly asks
-for a complete draft. By default, do not include frontmatter or H1; V10 main
+Output pure Markdown/MDX article material unless the main editor explicitly asks
+for a complete draft. By default, do not include frontmatter or H1; V11 main
 editor assembles the complete draft and validates it as one file.
 
 **Body MUST start with an H2 (`##`).** H3+ may follow inside an H2

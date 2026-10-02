@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Scan a Markdown draft for likely sensitive material.
 
-This is a conservative blocking gate for blog-update V10. It is not a secret
+This is a conservative blocking gate for blog-update V11. It is not a secret
 scanner replacement; it highlights content that needs human review before a
 conversation-derived article is published.
 
