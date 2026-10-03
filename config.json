@@ -1,5 +1,5 @@
 {
-  "projectRoot": ".",
+  "projectRoot": "/Volumes/mySSD/Projects/Web/SGJki-blog",
   "contentDir": "src/content/entries",
   "fileExtension": ".mdx",
   "format": "astro-mdx",

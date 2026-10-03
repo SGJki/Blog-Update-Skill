@@ -56,7 +56,7 @@ pages, Garden, RSS, and Pagefind.
 ```text
 blog-update/
 ├── SKILL.md / skill.md       # synchronized loader entrypoints
-├── config.json               # relative Astro project configuration
+├── config.json               # absolute Astro project configuration
 ├── prompts/
 │   ├── implement-agent.md    # optional evidence extraction
 │   ├── merge-agent.md        # optional existing-entry merge
@@ -73,7 +73,7 @@ blog-update/
 
 ```json
 {
-  "projectRoot": ".",
+  "projectRoot": "/Volumes/mySSD/Projects/Web/SGJki-blog",
   "contentDir": "src/content/entries",
   "fileExtension": ".mdx",
   "format": "astro-mdx",
@@ -81,8 +81,12 @@ blog-update/
 }
 ```
 
-The skill resolves `projectRoot` from the current working directory and checks
-for `package.json`, `src/content/config.ts`, and the content directory. A legacy
+`projectRoot` in `config.json` is the source of truth for the blog root — an
+absolute path to the Astro blog repository, not the caller's working
+directory. The skill resolves `contentDir` and entry paths against it and
+checks for `package.json`, `src/content/config.ts`, and the content directory
+there. If `projectRoot` is absent or relative, it falls back to resolving from
+the current working directory. A legacy
 `blogBasePath` pointing to an old posts directory must be reported before use.
 
 ## Validators

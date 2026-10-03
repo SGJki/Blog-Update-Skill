@@ -26,12 +26,14 @@ confirmation.
 
 ## Project discovery and configuration
 
-Read `config.json` when available. The V11 configuration is relative to the
-current project directory:
+Read `config.json` when available. It is the source of truth for where the
+blog lives; on this machine `projectRoot` is the absolute path to the Astro
+blog repository (`/Volumes/mySSD/Projects/Web/SGJki-blog`), not a path relative
+to the caller's working directory:
 
 ```json
 {
-  "projectRoot": ".",
+  "projectRoot": "/Volumes/mySSD/Projects/Web/SGJki-blog",
   "contentDir": "src/content/entries",
   "fileExtension": ".mdx",
   "format": "astro-mdx",
@@ -39,9 +41,11 @@ current project directory:
 }
 ```
 
-Resolve the project root from the current working directory, then confirm that
-`package.json`, `src/content/config.ts`, and the configured content directory
-exist. A legacy `blogBasePath`/`.md` config is not a valid target for this
+Use `projectRoot` from `config.json` as the blog root and resolve `contentDir`
+and all entry paths against it. Only when `projectRoot` is absent or relative
+resolve it against the current working directory, and confirm the target with
+the user in that case. Then confirm that `package.json`,
+`src/content/config.ts`, and the configured content directory exist there. A legacy `blogBasePath`/`.md` config is not a valid target for this
 project; report it and use the discovered Astro project only after the user has
 confirmed the target.
 
